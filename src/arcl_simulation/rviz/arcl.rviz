@@ -5,8 +5,9 @@ Panels:
     Property Tree Widget:
       Expanded:
         - /Pose vraie1/Shape1
+        - /Path1
       Splitter Ratio: 0.5
-    Tree Height: 590
+    Tree Height: 627
   - Class: rviz_common/Views
     Expanded:
       - /Current View1
@@ -299,6 +300,34 @@ Visualization Manager:
         Reliability Policy: Reliable
         Value: /table_markers
       Value: true
+    - Alpha: 1
+      Buffer Length: 1
+      Class: rviz_default_plugins/Path
+      Color: 25; 255; 0
+      Enabled: true
+      Head Diameter: 0.30000001192092896
+      Head Length: 0.20000000298023224
+      Length: 0.30000001192092896
+      Line Style: Billboards
+      Line Width: 0.029999999329447746
+      Name: Path
+      Offset:
+        X: 0
+        Y: 0
+        Z: 0
+      Pose Color: 255; 85; 255
+      Pose Style: None
+      Radius: 0.029999999329447746
+      Shaft Diameter: 0.10000000149011612
+      Shaft Length: 0.10000000149011612
+      Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        Filter size: 10
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /trajectoire
+      Value: true
   Enabled: true
   Global Options:
     Background Color: 48; 48; 48
@@ -324,7 +353,7 @@ Visualization Manager:
   Views:
     Current:
       Class: rviz_default_plugins/Orbit
-      Distance: 3.9916584491729736
+      Distance: 2.9595165252685547
       Enable Stereo Rendering:
         Stereo Eye Separation: 0.05999999865889549
         Stereo Focal Distance: 1
@@ -350,7 +379,7 @@ Window Geometry:
   Height: 1011
   Hide Left Dock: true
   Hide Right Dock: false
-  QMainWindow State: 000000ff00000000fd00000001000000000000019b0000039dfc0200000002fb000000100044006900730070006c006100790073000000003b000002cf000000c700fffffffb0000000a005600690065007700730000000310000000c8000000a000ffffff000003c00000039d00000004000000040000000800000008fc0000000100000002000000010000000a0054006f006f006c00730100000000ffffffff0000000000000000
+  QMainWindow State: 000000ff00000000fd00000001000000000000019b0000039dfc0200000002fb000000100044006900730070006c006100790073000000003b000002f4000000c700fffffffb0000000a005600690065007700730000000335000000a3000000a000ffffff000003c00000039d00000004000000040000000800000008fc0000000100000002000000010000000a0054006f006f006c00730100000000ffffffff0000000000000000
   Views:
     collapsed: true
   Width: 960

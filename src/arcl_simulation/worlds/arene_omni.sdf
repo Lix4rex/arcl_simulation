@@ -41,8 +41,9 @@
   <model name="balise_2"><static>true</static><pose>-0.094 1.95 0.25 0 0 0</pose><link name="link"><collision name="c"><geometry><cylinder><radius>0.05</radius><length>0.5</length></cylinder></geometry></collision><visual name="v"><geometry><cylinder><radius>0.05</radius><length>0.5</length></cylinder></geometry><material><ambient>0.1 0.1 0.1 1</ambient><diffuse>0.1 0.1 0.1 1</diffuse><specular>0.1 0.1 0.1 1</specular></material></visual></link></model>
   <model name="balise_3"><static>true</static><pose>3.094 1 0.25 0 0 0</pose><link name="link"><collision name="c"><geometry><cylinder><radius>0.05</radius><length>0.5</length></cylinder></geometry></collision><visual name="v"><geometry><cylinder><radius>0.05</radius><length>0.5</length></cylinder></geometry><material><ambient>0.1 0.1 0.1 1</ambient><diffuse>0.1 0.1 0.1 1</diffuse><specular>0.1 0.1 0.1 1</specular></material></visual></link></model>
   
-
+  <model name="obstacle1"><static>true</static><pose>1.5 1 0.25 0 0 0</pose><link name="link"><collision name="c"><geometry><cylinder><radius>0.05</radius><length>0.5</length></cylinder></geometry></collision><visual name="v"><geometry><cylinder><radius>0.05</radius><length>0.5</length></cylinder></geometry><material><ambient>0.1 0.1 0.1 1</ambient><diffuse>0.1 0.1 0.1 1</diffuse><specular>0.1 0.1 0.1 1</specular></material></visual></link></model>
   
+  <model name="obstacle2"><static>true</static><pose>1.75 1 0.25 0 0 0</pose><link name="link"><collision name="c"><geometry><cylinder><radius>0.05</radius><length>0.5</length></cylinder></geometry></collision><visual name="v"><geometry><cylinder><radius>0.05</radius><length>0.5</length></cylinder></geometry><material><ambient>0.1 0.1 0.1 1</ambient><diffuse>0.1 0.1 0.1 1</diffuse><specular>0.1 0.1 0.1 1</specular></material></visual></link></model>
 
   <model name="robot_omni"><pose>0.5 1 0 0 0 0</pose>
 

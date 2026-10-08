@@ -3,6 +3,7 @@
 #include "geometry_msgs/msg/pose_stamped.hpp"
 #include "sensor_msgs/msg/laser_scan.hpp"
 #include "visualization_msgs/msg/marker.hpp"
+#include "robot_msgs/msg/obstacle_array.hpp"
 
 #include <Eigen/Dense>
 #include <vector>
@@ -55,6 +56,10 @@ class EKFSolo : public rclcpp::Node{
 
                         balise_point_pub_ = this->create_publisher<visualization_msgs::msg::Marker>(
                                 "/balise_marker", 10
+                        );
+
+                        obstacles_pub_ = this->create_publisher<robot_msgs::msg::ObstacleArray>(
+                                "/obstacles_scan", 10
                         );
 
                         float a = sqrt(2)/4;
@@ -222,67 +227,110 @@ class EKFSolo : public rclcpp::Node{
 
 
 
-
+                const float tolerance_largeur = 0.02;
+                const float distance_max_balise = 0.3;
+                const float marge = 0.05f;
                 rclcpp::Subscription<sensor_msgs::msg::LaserScan>::SharedPtr scan_sub_;
+                rclcpp::Publisher<robot_msgs::msg::ObstacleArray>::SharedPtr obstacles_pub_;
                 void scan_callback(const sensor_msgs::msg::LaserScan::SharedPtr scan_msg){
 
                         if (states_history_.empty()) return;
 
-                        std::vector<std::vector<int>> clusters = dbScan(0.1, 2, scan_msg);
-
-                        std::vector<std::vector<float>> cluster_centers;
-
-                        for (unsigned long int j=0; j<clusters.size(); j++){
-                            std::vector<int> cluster = clusters[j];
-
-                            std::vector<std::vector<float>> pts;
-                            for (unsigned long int k=0; k<cluster.size(); k++){
-                                std::vector<float> point;
-
-                                float angle = scan_msg->angle_min + cluster[k]*scan_msg->angle_increment;
-                                point.push_back(scan_msg->ranges[cluster[k]] * cos(angle));
-                                point.push_back(scan_msg->ranges[cluster[k]] * sin(angle));
-                                pts.push_back(point);
-                            }
-
-                            float p_moy_x = 0;
-                            float p_moy_y = 0;
-                            for (unsigned long int k=0; k<pts.size(); k++){
-                                p_moy_x += pts[k][0];
-                                p_moy_y += pts[k][1];
-                            }
-                            p_moy_x = p_moy_x / pts.size();
-                            p_moy_y = p_moy_y / pts.size();
-
-                            float norme_p_moy = sqrt(p_moy_x*p_moy_x + p_moy_y*p_moy_y);
-
-                            std::vector<float> c0;
-                            c0.push_back(p_moy_x + r_balise * p_moy_x / norme_p_moy);
-                            c0.push_back(p_moy_y + r_balise * p_moy_y / norme_p_moy);
-
-                            std::vector<float> cluster_center = gauss_newton(c0, pts);
-
-                            std::vector<float> z;
-                            z.push_back(sqrt(cluster_center[1]*cluster_center[1] + cluster_center[0]*cluster_center[0]));
-                            z.push_back(atan2(cluster_center[1], cluster_center[0]));
-                            cluster_centers.push_back(z);
-
-                            publish_markers(scan_msg, cluster_center, j);
-                        }
-
                         double tm = toSec(scan_msg->header.stamp);
                         int k = 0;
                         for (size_t i = 0; i < states_history_.size(); ++i) {
-                            if (states_history_[i].t <= tm) {k = i;} else {break;}
+                        if (states_history_[i].t <= tm) {k = i;} else {break;}
                         }
 
                         Eigen::Matrix<double, 3, 1> state_estimation = states_history_[k].state_estimation;
                         Eigen::Matrix<double, 3, 3> state_covariance_estimation = states_history_[k].state_covariance_estimation;
 
+                        std::vector<std::vector<int>> clusters = dbScan(0.1, 2, scan_msg);
 
-                        for (unsigned long int c_index=0; c_index<clusters.size(); c_index++){
+                        std::vector<std::vector<float>> cluster_centers;
 
-                                // on cherche la balise qui correspond le mieux à cette détection
+                        std::vector<std::vector<float>> obstacles_monde;
+                        
+                        robot_msgs::msg::ObstacleArray out;
+                        out.header.stamp = scan_msg->header.stamp;
+                        out.header.frame_id = "map";
+
+                        for (unsigned long int j=0; j<clusters.size(); j++){
+                                const std::vector<int> &cluster = clusters[j];
+
+                                std::vector<std::vector<float>> pts;
+                                for (unsigned long int i=0; i<cluster.size(); i++){
+                                        float angle = scan_msg->angle_min + cluster[i]*scan_msg->angle_increment;
+                                        float r = scan_msg->ranges[cluster[i]];
+                                        pts.push_back({r * (float)cos(angle), r * (float)sin(angle)});
+                                }
+                                if (pts.empty()) continue;
+
+                                float p_moy_x = 0, p_moy_y = 0;
+                                for (const auto &pt : pts){ p_moy_x += pt[0]; p_moy_y += pt[1]; }
+                                p_moy_x /= pts.size();
+                                p_moy_y /= pts.size();
+                                float norme_p_moy = sqrt(p_moy_x*p_moy_x + p_moy_y*p_moy_y);
+                                if (norme_p_moy < 1e-3) continue;
+
+                                float theta_r = state_estimation[2];
+                                float x_obs = state_estimation[0] + p_moy_x*cos(theta_r) - p_moy_y*sin(theta_r);
+                                float y_obs = state_estimation[1] + p_moy_x*sin(theta_r) + p_moy_y*cos(theta_r);
+
+                                float largeur = 0;
+                                for (size_t a=0; a<pts.size(); a++)
+                                        for (size_t b=a+1; b<pts.size(); b++)
+                                                largeur = std::max(largeur, (float)hypot(pts[a][0]-pts[b][0], pts[a][1]-pts[b][1]));
+
+                                float pas_laser   = norme_p_moy * scan_msg->angle_increment;
+                                float largeur_max = 2*r_balise + tolerance_largeur;
+                                float largeur_min = 2*r_balise - 2*pas_laser - tolerance_largeur;
+
+                                if (largeur > largeur_max || largeur < largeur_min){
+                                        obstacles_monde.push_back({x_obs, y_obs});
+                                        robot_msgs::msg::Obstacle obs;
+                                        obs.x = x_obs;
+                                        obs.y = y_obs;
+                                        obs.radius = largeur / 2.0f + marge; 
+                                        out.obstacles.push_back(obs);
+                                        continue;
+                                }
+
+                                std::vector<float> c0 = { p_moy_x + r_balise * p_moy_x / norme_p_moy,
+                                                        p_moy_y + r_balise * p_moy_y / norme_p_moy };
+                                std::vector<float> cluster_center = gauss_newton(c0, pts);
+
+                                float z_r   = sqrt(cluster_center[0]*cluster_center[0] + cluster_center[1]*cluster_center[1]);
+                                float z_phi = atan2(cluster_center[1], cluster_center[0]);
+
+                                float xw = state_estimation[0] + z_r * cos(z_phi + theta_r);
+                                float yw = state_estimation[1] + z_r * sin(z_phi + theta_r);
+
+                                float sigma_pos = sqrt(std::max(state_covariance_estimation(0, 0), state_covariance_estimation(1, 1)));
+                                float seuil_distance = std::max(distance_max_balise, (float)(3*sigma_pos));
+
+                                float d_min = 1e9;
+                                for (const auto &bal : balises)
+                                        d_min = std::min(d_min, (float)hypot(bal[0] - xw, bal[1] - yw));
+
+                                if (d_min > seuil_distance){
+                                        obstacles_monde.push_back({x_obs, y_obs});
+                                        robot_msgs::msg::Obstacle obs;
+                                        obs.x = x_obs;
+                                        obs.y = y_obs;
+                                        obs.radius = largeur / 2.0f + marge; 
+                                        out.obstacles.push_back(obs);
+                                        continue;
+                                }
+
+                                cluster_centers.push_back({z_r, z_phi});
+                                publish_markers(scan_msg, cluster_center, j);
+                        }
+
+                        obstacles_pub_->publish(out);
+
+                        for (unsigned long int c_index=0; c_index<cluster_centers.size(); c_index++){
+
                                 float meilleur_d_carre = gamma_porte;
                                 Eigen::Matrix<double, 2, 1> meilleure_innovation;
                                 Eigen::Matrix<double, 2, 3> meilleure_Hj;
@@ -292,6 +340,7 @@ class EKFSolo : public rclcpp::Node{
                                         float deltaX = balises[b_index][0] - state_estimation[0];
                                         float deltaY = balises[b_index][1] - state_estimation[1];
                                         float q = deltaX*deltaX + deltaY*deltaY;
+                                        if (q < 1e-6) continue;
 
                                         float theta = state_estimation[2];
 
@@ -304,7 +353,7 @@ class EKFSolo : public rclcpp::Node{
                                         Hj(0, 1) = -1/sqrt(q) * deltaY;
                                         Hj(0, 2) = 0;
                                         Hj(1, 0) = 1/q * deltaY;
-                                        Hj(1, 1) = -1/q *deltaX;
+                                        Hj(1, 1) = -1/q * deltaX;
                                         Hj(1, 2) = -1;
 
                                         Eigen::Matrix<double, 2, 1> innovation;
@@ -312,16 +361,16 @@ class EKFSolo : public rclcpp::Node{
                                         innovation(1, 0) = wrap(cluster_centers[c_index][1] - hj(1, 0));
 
                                         Eigen::Matrix<double, 2, 2> S = Hj*state_covariance_estimation*Hj.transpose() + Rm_;
-                                        float deltaS = S(0, 0)*S(1, 1) - S(0, 1)*S(0, 1);
+                                        float deltaS = S(0, 0)*S(1, 1) - S(0, 1)*S(1, 0);
                                         if (deltaS <= 0) continue;
 
                                         Eigen::Matrix<double, 2, 2> S_inverse;
-                                        S_inverse(0, 0) = S(1, 1)/deltaS;
+                                        S_inverse(0, 0) =  S(1, 1)/deltaS;
                                         S_inverse(0, 1) = -S(0, 1)/deltaS;
                                         S_inverse(1, 0) = -S(1, 0)/deltaS;
-                                        S_inverse(1, 1) = S(0, 0)/deltaS;
+                                        S_inverse(1, 1) =  S(0, 0)/deltaS;
 
-                                        float d_carre = 1/deltaS * (S(1, 1)*innovation(0, 0)*innovation(0, 0) - 2*S(0, 1)*innovation(0, 0)*innovation(1, 0) + S(0, 0)*innovation(1, 0)*innovation(1, 0));
+                                        float d_carre = (innovation.transpose() * S_inverse * innovation)(0, 0);
 
                                         if (d_carre < meilleur_d_carre){
                                                 meilleur_d_carre = d_carre;
@@ -331,7 +380,6 @@ class EKFSolo : public rclcpp::Node{
                                         }
                                 }
 
-                                // aucune balise sous le seuil de porte : détection rejetée
                                 if (meilleur_d_carre >= gamma_porte) continue;
 
                                 Eigen::Matrix<double, 3, 2> gain_kalman = state_covariance_estimation * meilleure_Hj.transpose() * meilleure_S_inverse;
@@ -339,18 +387,17 @@ class EKFSolo : public rclcpp::Node{
                                 state_estimation = state_estimation + gain_kalman*meilleure_innovation;
                                 state_estimation[2] = wrap(state_estimation[2]);
 
-                                state_covariance_estimation = (Eigen::Matrix3d::Identity() - gain_kalman*meilleure_Hj)*state_covariance_estimation*(Eigen::Matrix3d::Identity() - gain_kalman*meilleure_Hj).transpose() + gain_kalman*Rm_*gain_kalman.transpose();
-
+                                Eigen::Matrix3d I_KH = Eigen::Matrix3d::Identity() - gain_kalman*meilleure_Hj;
+                                state_covariance_estimation = I_KH*state_covariance_estimation*I_KH.transpose() + gain_kalman*Rm_*gain_kalman.transpose();
                                 state_covariance_estimation = 0.5 * (state_covariance_estimation + state_covariance_estimation.transpose());
                         }
 
-                        // retour au présent : on rejoue les déplacements mémorisés après tm
                         states_history_[k].state_estimation = state_estimation;
                         states_history_[k].state_covariance_estimation = state_covariance_estimation;
                         for (size_t i = k + 1; i < states_history_.size(); ++i) {
-                            prediction(state_estimation, state_covariance_estimation, states_history_[i].deplacement_robot, states_history_[i].covariance_deplacement);
-                            states_history_[i].state_estimation = state_estimation;
-                            states_history_[i].state_covariance_estimation = state_covariance_estimation;
+                                prediction(state_estimation, state_covariance_estimation, states_history_[i].deplacement_robot, states_history_[i].covariance_deplacement);
+                                states_history_[i].state_estimation = state_estimation;
+                                states_history_[i].state_covariance_estimation = state_covariance_estimation;
                         }
 
                         this->state_estimation = state_estimation;
@@ -430,7 +477,7 @@ class EKFSolo : public rclcpp::Node{
                                                                 if (neighbors2.size() >= minPts) {
                                                                         for (size_t k = 0; k < neighbors2.size(); k++) {
                                                                                 if (std::find(neighbors.begin(), neighbors.end(), neighbors2[k]) == neighbors.end()) {
-                                                                                neighbors.push_back(neighbors2[k]);
+                                                                                        neighbors.push_back(neighbors2[k]);
                                                                                 }
                                                                         }
                                                                 }

@@ -14,15 +14,16 @@ find_package(sensor_msgs)
 find_package(visualization_msgs)
 find_package(Eigen3 REQUIRED)
 find_package(geometry_msgs REQUIRED)
+find_package(nav_msgs REQUIRED)
 
 
 add_executable(robot_control src/robot_control.cpp)
 target_include_directories(robot_control PRIVATE ${EIGEN3_INCLUDE_DIR})
-ament_target_dependencies(robot_control rclcpp std_msgs robot_msgs geometry_msgs sensor_msgs)
+ament_target_dependencies(robot_control rclcpp std_msgs robot_msgs geometry_msgs sensor_msgs nav_msgs)
 
 add_executable(ekf_solo src/ekf_solo.cpp)
 target_include_directories(ekf_solo PRIVATE ${EIGEN3_INCLUDE_DIR})
-ament_target_dependencies(ekf_solo rclcpp sensor_msgs geometry_msgs visualization_msgs) 
+ament_target_dependencies(ekf_solo rclcpp sensor_msgs geometry_msgs visualization_msgs robot_msgs) 
 
 add_executable(table_markers src/table_markers.cpp)
 ament_target_dependencies(table_markers rclcpp visualization_msgs)

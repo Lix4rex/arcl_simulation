@@ -3,6 +3,8 @@
 #include "robot_msgs/msg/wheel_commands.hpp"
 #include "geometry_msgs/msg/pose_stamped.hpp"
 #include "sensor_msgs/msg/laser_scan.hpp"
+#include "robot_msgs/msg/obstacle_array.hpp"
+#include "nav_msgs/msg/path.hpp"
 
 #include <cmath>
 #include <algorithm>
@@ -66,12 +68,18 @@ class RobotControl : public rclcpp::Node{
                                 std::bind(&RobotControl::goal_callback, this, std::placeholders::_1)
                         );
 
-                        // consigne publiée pour la comparer à la vraie position dans RViz / PlotJuggler
-                        consigne_pub_ = this->create_publisher<geometry_msgs::msg::PoseStamped>(
-                                "/trajectory_reference", 10
+                        obstacles_sub_ = this->create_subscription<robot_msgs::msg::ObstacleArray>(
+                                "/obstacles_scan", 10,
+                                std::bind(&RobotControl::obstacles_callback, this, std::placeholders::_1)
+                        );
+
+                        path_pub_ = this->create_publisher<nav_msgs::msg::Path>(
+                                "/trajectoire", 10
                         );
 
                         control_timer_ = this->create_wall_timer(20ms, std::bind(&RobotControl::trajectory_control_loop, this));
+
+                        trajectory_generation_timer = this->create_wall_timer(100ms, std::bind(&RobotControl::trajectory_generation_loop, this));
 
                         RCLCPP_INFO(this->get_logger(), "RobotControl launched successfuly");
                 }
@@ -82,7 +90,6 @@ class RobotControl : public rclcpp::Node{
                 rclcpp::Publisher<std_msgs::msg::Float64>::SharedPtr cmd_vel_wheel2_pub_;
                 rclcpp::Publisher<std_msgs::msg::Float64>::SharedPtr cmd_vel_wheel3_pub_;
                 rclcpp::Publisher<std_msgs::msg::Float64>::SharedPtr cmd_vel_wheel4_pub_;
-                rclcpp::Publisher<geometry_msgs::msg::PoseStamped>::SharedPtr consigne_pub_;
 
                 rclcpp::Subscription<robot_msgs::msg::WheelCommands>::SharedPtr wheel_commands_sub_;
                 void wheel_commands_callback(const robot_msgs::msg::WheelCommands::SharedPtr wheel_commands){
@@ -93,6 +100,14 @@ class RobotControl : public rclcpp::Node{
 
                 float wheel_radius = 0.03;
                 float wheel_distance_from_center = 0.162635;
+                float robot_radius = 0.2f;
+                float secu_marge = 0.1f;
+
+                float v_max_trajectoire = 0.2;
+                float a_max_trajectoire = 0.8;
+
+                static const int nb_points = 15;
+                int nb_pas_table = 6000;
 
                 float Kp = 2.0;
                 float Ki = 0.2;
@@ -101,7 +116,7 @@ class RobotControl : public rclcpp::Node{
                 float Ki_theta = 0.67;
                 float Kd_theta = 0.0;
 
-                float vitesse_max = 0.5;
+                float vitesse_max = v_max_trajectoire;
                 float vitesse_angulaire_max = 2.0;
                 float integrale_max = 0.02;
 
@@ -133,21 +148,17 @@ class RobotControl : public rclcpp::Node{
                 }
 
 
-                static const int nb_points = 7;
                 TrajectoryPoints p[nb_points];
                 TrajectoryTangentes m[nb_points];
 
                 float u;
 
-                float v_max_trajectoire = 0.4;
-                float a_max_trajectoire = 0.8;
                 float t_acceleration = 0;
                 float d_acceleration = 0;
                 float t_croisiere = 0;
                 float v_pic = 0;
                 float duree_trajectoire = 0;
 
-                int nb_pas_table = 6000;
                 std::vector<float> table_u;
                 std::vector<float> table_s;
                 float longueur_trajectoire = 0;
@@ -283,13 +294,7 @@ class RobotControl : public rclcpp::Node{
                 }
 
 
-                
-                rclcpp::Subscription<sensor_msgs::msg::LaserScan>::SharedPtr scan_sub_;
-                void scan_callback(const sensor_msgs::msg::LaserScan::SharedPtr scan_msg){
-                        
-                }
-
-
+                rclcpp::Publisher<nav_msgs::msg::Path>::SharedPtr path_pub_;
                 rclcpp::Subscription<geometry_msgs::msg::PoseStamped>::SharedPtr goal_sub_;
                 void goal_callback(const geometry_msgs::msg::PoseStamped::SharedPtr goal){
                         x_goal = goal->pose.position.x;
@@ -302,22 +307,91 @@ class RobotControl : public rclcpp::Node{
                         erreur_precedente_theta = wrap(theta_goal - theta);
                         goal_active = true;
 
+                        create_trajectory();
+
+                        RCLCPP_INFO(this->get_logger(), "Nouvel objectif : (%.3f, %.3f, %.1f°), trajectoire de %.3f m en %.2f s", x_goal, y_goal, theta_goal*180/M_PI, longueur_trajectoire, duree_trajectoire);
+                }
+
+
+                rclcpp::TimerBase::SharedPtr trajectory_generation_timer;
+                void trajectory_generation_loop(){
+                        if (!trajectoire_active || !check_conflict()) return;
+                        RCLCPP_INFO(this->get_logger(), "Il y a conflit, CHANGEMENT DE TRAJECTOIRE NECESSAIRE");
+                        create_trajectory();
+                }
+                
+                rclcpp::Subscription<robot_msgs::msg::ObstacleArray>::SharedPtr obstacles_sub_;
+                std::vector<robot_msgs::msg::Obstacle> obstacles; 
+                void obstacles_callback(const robot_msgs::msg::ObstacleArray::SharedPtr cluster_msg){
+                        obstacles.clear();
+                        obstacles.reserve(cluster_msg->obstacles.size());
+
+                        for (const auto & obs : cluster_msg->obstacles) {
+                                obstacles.emplace_back(obs);
+                        }
+                }
+
+                bool check_conflict(){
+                        for (size_t k = 0; k < table_u.size(); k++){
+                                Eigen::Matrix<double, 2, 1> point = courbe(table_u[k]);
+                                float px = point(0);
+                                float py = point(1);
+
+                                for (const auto &obs : obstacles){
+                                        float distance_contact = robot_radius;
+
+                                        float vx = px - obs.x;
+                                        float vy = py - obs.y;
+                                        float distance_obstacle = sqrt(vx*vx + vy*vy);
+
+                                        if (distance_obstacle <= distance_contact) return true;
+                                }
+                        }
+                        return false;
+                }
+
+                void create_trajectory(){
                         u=0;
+
+                        float distance = sqrt((x_goal - x)*(x_goal - x) + (y_goal - y)*(y_goal - y));
+                        float dir_x = (x_goal - x) / distance;
+                        float dir_y = (y_goal - y) / distance;
 
                         float delta_x = (x_goal - x)/(nb_points - 1);
                         float delta_y = (y_goal - y)/(nb_points - 1);
 
                         for (int i=0; i<nb_points; i++){
-                                p[i] = {i, x + i*delta_x, y + i*delta_y};
-                        }
+                                float px = x + i*delta_x;
+                                float py = y + i*delta_y;
 
-                        /*p[0] = {0, x, y};
-                        p[1] = {1, 0.9, 1.6};
-                        p[2] = {2, 1.5, 1.7};
-                        p[3] = {3, 1.8, 1.1};
-                        p[4] = {4, 1.9, 0.5};
-                        p[5] = {5, 2.2, 0.35};
-                        p[6] = {6, x_goal, y_goal};*/
+                                if (i > 0 && i < nb_points - 1){
+                                        for (const auto &obs : obstacles){
+                                                float distance_evitement = robot_radius + secu_marge;
+
+                                                float vx = px - obs.x;
+                                                float vy = py - obs.y;
+                                                float distance_obstacle = sqrt(vx*vx + vy*vy);
+
+                                                if (distance_obstacle > distance_evitement) continue;
+
+
+                                                float perp_x = -dir_y;
+                                                float perp_y =  dir_x;
+                                                float position_laterale_centre = vx*perp_x + vy*perp_y; // produit scalaire du vecteur (point -> obstacle) / (vecteur normal à la trajectoire)
+                                                if (position_laterale_centre < 0) {
+                                                        perp_x = -perp_x;
+                                                        perp_y = -perp_y;
+                                                }
+
+                                                float avance = vx*dir_x + vy*dir_y;
+                                                float decalage = sqrt(distance_evitement*distance_evitement - avance*avance);
+
+                                                px = obs.x + avance*dir_x + decalage*perp_x;
+                                                py = obs.y + avance*dir_y + decalage*perp_y;
+                                        }
+                                }
+                                p[i] = {i, px, py};
+                        }
 
                         m[0] = {0, p[1].x - p[0].x, p[1].y - p[0].y};
                         for (int i=1; i<nb_points-1; i++){
@@ -332,7 +406,26 @@ class RobotControl : public rclcpp::Node{
                         t_debut_trajectoire = this->now().seconds();
                         trajectoire_active = longueur_trajectoire > 0.001;
 
-                        RCLCPP_INFO(this->get_logger(), "Nouvel objectif : (%.3f, %.3f, %.1f°), trajectoire de %.3f m en %.2f s", x_goal, y_goal, theta_goal*180/M_PI, longueur_trajectoire, duree_trajectoire);
+                        publish_calculated_points();
+                }
+
+                void publish_calculated_points(){
+                        nav_msgs::msg::Path chemin;
+                        chemin.header.stamp = this->now();
+                        chemin.header.frame_id = "map";
+
+                        for (size_t k = 0; k < table_u.size(); k++) {
+                                Eigen::Matrix<double, 2, 1> point = courbe(table_u[k]);
+
+                                geometry_msgs::msg::PoseStamped pose;
+                                pose.header = chemin.header;
+                                pose.pose.position.x = point(0);
+                                pose.pose.position.y = point(1);
+                                pose.pose.orientation.w = 1.0;
+                                chemin.poses.push_back(pose);
+                        }
+
+                        path_pub_->publish(chemin);
                 }
 
 
@@ -433,18 +526,6 @@ class RobotControl : public rclcpp::Node{
                         omega = std::clamp(omega, -vitesse_angulaire_max, vitesse_angulaire_max);
 
                         send_robot_speed(vx_table, vy_table, omega);
-                        publish_consigne(p_ref(0, 0), p_ref(1, 0), theta_ref);
-                }
-
-                void publish_consigne(float x_ref, float y_ref, float theta_ref){
-                        geometry_msgs::msg::PoseStamped msg;
-                        msg.header.stamp = this->now();
-                        msg.header.frame_id = "map";
-                        msg.pose.position.x = x_ref;
-                        msg.pose.position.y = y_ref;
-                        msg.pose.orientation.z = sin(theta_ref/2);
-                        msg.pose.orientation.w = cos(theta_ref/2);
-                        consigne_pub_->publish(msg);
                 }
 
                 void send_robot_speed(float vx_table, float vy_table, float omega){
