@@ -347,6 +347,9 @@ class RobotControl : public rclcpp::Node{
                         float delta_x = (x_goal - x)/(nb_points - 1);
                         float delta_y = (y_goal - y)/(nb_points - 1);
 
+                        float perp_x = -dir_y;
+                        float perp_y =  dir_x;
+
                         for (int i=0; i<nb_points; i++){
                                 float px = x + i*delta_x;
                                 float py = y + i*delta_y;
@@ -361,12 +364,12 @@ class RobotControl : public rclcpp::Node{
 
                                                 if (distance_obstacle > distance_evitement) continue;
 
-                                                float perp_x = -dir_y;
-                                                float perp_y =  dir_x;
-                                                float position_laterale_centre = vx*perp_x + vy*perp_y; // produit scalaire du vecteur (point -> obstacle) / (vecteur normal à la trajectoire)
-                                                if (position_laterale_centre < 0) {
-                                                        perp_x = -perp_x;
-                                                        perp_y = -perp_y;
+                                                if (i == 1){
+                                                        float position_laterale_centre = vx*perp_x + vy*perp_y; // produit scalaire du vecteur (point -> obstacle) / (vecteur normal à la trajectoire)
+                                                        if (position_laterale_centre < 0) {
+                                                                perp_x = -perp_x;
+                                                                perp_y = -perp_y;
+                                                        }
                                                 }
 
                                                 float avance = vx*dir_x + vy*dir_y;
@@ -505,7 +508,7 @@ class RobotControl : public rclcpp::Node{
                     marker.action = visualization_msgs::msg::Marker::ADD;
                     marker.pose.position.x = x;
                     marker.pose.position.y = y;
-                    marker.pose.position.z = 0.0;
+                    marker.pose.position.z = 0.5;
                     marker.pose.orientation.w = 1.0;
                     marker.scale.x = radius;
                     marker.scale.y = radius;

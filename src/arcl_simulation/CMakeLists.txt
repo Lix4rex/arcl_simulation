@@ -31,7 +31,7 @@ ament_target_dependencies(table_markers rclcpp visualization_msgs)
 install(TARGETS robot_control ekf_solo table_markers
   DESTINATION lib/${PROJECT_NAME})
 
-install(DIRECTORY config launch rviz urdf worlds 
+install(DIRECTORY config launch rviz urdf worlds models
   DESTINATION share/${PROJECT_NAME})
 
 

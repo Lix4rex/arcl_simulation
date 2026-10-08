@@ -63,5 +63,6 @@ def generate_launch_description():
     return LaunchDescription([
         DeclareLaunchArgument('rviz', default_value='true'),
         AppendEnvironmentVariable('GZ_SIM_RESOURCE_PATH', os.path.join(pkg, 'worlds')),
+        AppendEnvironmentVariable('GZ_SIM_RESOURCE_PATH',os.path.join(pkg, 'models')),
         gz, bridge, rsp, rviz, robot_control, ekf_solo, table_markers
     ])

@@ -1,0 +1,80 @@
+<?xml version="1.0"?>
+<sdf version="1.9">
+<model name="humain">
+  <static>true</static>
+  <!-- Spectateur Eurobot qui filme le match. Repere : origine au sol entre les pieds, x vers l'avant. Taille ~1.72 m. -->
+  <link name="link">
+    <!-- Collisions simplifiees : le lidar (z = 0.385 m) voit deux jambes -->
+    <collision name="jambe_g_c"><pose>0 0.1 0.45 0 0 0</pose><geometry><capsule><radius>0.07</radius><length>0.72</length></capsule></geometry></collision>
+    <collision name="jambe_d_c"><pose>0 -0.1 0.45 0 0 0</pose><geometry><capsule><radius>0.07</radius><length>0.72</length></capsule></geometry></collision>
+    <collision name="torse_c"><pose>0 0 1.15 0 0 0</pose><geometry><box><size>0.26 0.44 0.6</size></box></geometry></collision>
+    <collision name="tete_c"><pose>0 0 1.6 0 0 0</pose><geometry><sphere><radius>0.12</radius></sphere></geometry></collision>
+
+    <!-- Jambe gauche -->
+    <visual name="semelle_g"><pose>0.06 0.1 0.01 0 0 0</pose><geometry><box><size>0.27 0.1 0.02</size></box></geometry><material><ambient>0.95 0.95 0.95 1</ambient><diffuse>0.95 0.95 0.95 1</diffuse><specular>0.1 0.1 0.1 1</specular></material></visual>
+    <visual name="chaussure_g"><pose>0.055 0.1 0.05 0 0 0</pose><geometry><box><size>0.24 0.095 0.06</size></box></geometry><material><ambient>0.18 0.18 0.2 1</ambient><diffuse>0.18 0.18 0.2 1</diffuse><specular>0.1 0.1 0.1 1</specular></material></visual>
+    <visual name="bout_g"><pose>0.17 0.1 0.045 0 0 0</pose><geometry><ellipsoid><radii>0.03 0.0475 0.035</radii></ellipsoid></geometry><material><ambient>0.18 0.18 0.2 1</ambient><diffuse>0.18 0.18 0.2 1</diffuse><specular>0.1 0.1 0.1 1</specular></material></visual>
+    <visual name="lacets_g"><pose>0.08 0.1 0.082 0 0 0</pose><geometry><box><size>0.08 0.04 0.005</size></box></geometry><material><ambient>0.95 0.95 0.95 1</ambient><diffuse>0.95 0.95 0.95 1</diffuse><specular>0.1 0.1 0.1 1</specular></material></visual>
+    <visual name="mollet_g"><pose>0 0.1 0.28 0 0 0</pose><geometry><capsule><radius>0.06</radius><length>0.32</length></capsule></geometry><material><ambient>0.16 0.24 0.42 1</ambient><diffuse>0.16 0.24 0.42 1</diffuse><specular>0.1 0.1 0.1 1</specular></material></visual>
+    <visual name="genou_g"><pose>0.005 0.1 0.49 0 0 0</pose><geometry><sphere><radius>0.068</radius></sphere></geometry><material><ambient>0.16 0.24 0.42 1</ambient><diffuse>0.16 0.24 0.42 1</diffuse><specular>0.1 0.1 0.1 1</specular></material></visual>
+    <visual name="cuisse_g"><pose>0 0.1 0.68 0 0 0</pose><geometry><capsule><radius>0.08</radius><length>0.32</length></capsule></geometry><material><ambient>0.16 0.24 0.42 1</ambient><diffuse>0.16 0.24 0.42 1</diffuse><specular>0.1 0.1 0.1 1</specular></material></visual>
+
+    <!-- Jambe droite -->
+    <visual name="semelle_d"><pose>0.06 -0.1 0.01 0 0 0</pose><geometry><box><size>0.27 0.1 0.02</size></box></geometry><material><ambient>0.95 0.95 0.95 1</ambient><diffuse>0.95 0.95 0.95 1</diffuse><specular>0.1 0.1 0.1 1</specular></material></visual>
+    <visual name="chaussure_d"><pose>0.055 -0.1 0.05 0 0 0</pose><geometry><box><size>0.24 0.095 0.06</size></box></geometry><material><ambient>0.18 0.18 0.2 1</ambient><diffuse>0.18 0.18 0.2 1</diffuse><specular>0.1 0.1 0.1 1</specular></material></visual>
+    <visual name="bout_d"><pose>0.17 -0.1 0.045 0 0 0</pose><geometry><ellipsoid><radii>0.03 0.0475 0.035</radii></ellipsoid></geometry><material><ambient>0.18 0.18 0.2 1</ambient><diffuse>0.18 0.18 0.2 1</diffuse><specular>0.1 0.1 0.1 1</specular></material></visual>
+    <visual name="lacets_d"><pose>0.08 -0.1 0.082 0 0 0</pose><geometry><box><size>0.08 0.04 0.005</size></box></geometry><material><ambient>0.95 0.95 0.95 1</ambient><diffuse>0.95 0.95 0.95 1</diffuse><specular>0.1 0.1 0.1 1</specular></material></visual>
+    <visual name="mollet_d"><pose>0 -0.1 0.28 0 0 0</pose><geometry><capsule><radius>0.06</radius><length>0.32</length></capsule></geometry><material><ambient>0.16 0.24 0.42 1</ambient><diffuse>0.16 0.24 0.42 1</diffuse><specular>0.1 0.1 0.1 1</specular></material></visual>
+    <visual name="genou_d"><pose>0.005 -0.1 0.49 0 0 0</pose><geometry><sphere><radius>0.068</radius></sphere></geometry><material><ambient>0.16 0.24 0.42 1</ambient><diffuse>0.16 0.24 0.42 1</diffuse><specular>0.1 0.1 0.1 1</specular></material></visual>
+    <visual name="cuisse_d"><pose>0 -0.1 0.68 0 0 0</pose><geometry><capsule><radius>0.08</radius><length>0.32</length></capsule></geometry><material><ambient>0.16 0.24 0.42 1</ambient><diffuse>0.16 0.24 0.42 1</diffuse><specular>0.1 0.1 0.1 1</specular></material></visual>
+
+    <!-- Bassin et ceinture -->
+    <visual name="bassin"><pose>0 0 0.91 0 0 0</pose><geometry><box><size>0.22 0.36 0.16</size></box></geometry><material><ambient>0.16 0.24 0.42 1</ambient><diffuse>0.16 0.24 0.42 1</diffuse><specular>0.1 0.1 0.1 1</specular></material></visual>
+    <visual name="ceinture"><pose>0 0 0.995 0 0 0</pose><geometry><box><size>0.226 0.366 0.04</size></box></geometry><material><ambient>0.3 0.18 0.1 1</ambient><diffuse>0.3 0.18 0.1 1</diffuse><specular>0.1 0.1 0.1 1</specular></material></visual>
+    <visual name="boucle"><pose>0.115 0 0.995 0 0 0</pose><geometry><box><size>0.008 0.05 0.035</size></box></geometry><material><ambient>0.8 0.8 0.82 1</ambient><diffuse>0.8 0.8 0.82 1</diffuse><specular>0.1 0.1 0.1 1</specular></material></visual>
+
+    <!-- Torse (t-shirt) -->
+    <visual name="ventre"><pose>0 0 1.14 0 0 0</pose><geometry><box><size>0.22 0.38 0.3</size></box></geometry><material><ambient>0.85 0.27 0.15 1</ambient><diffuse>0.85 0.27 0.15 1</diffuse><specular>0.1 0.1 0.1 1</specular></material></visual>
+    <visual name="poitrine"><pose>0 0 1.27 0 0 0</pose><geometry><ellipsoid><radii>0.13 0.2 0.17</radii></ellipsoid></geometry><material><ambient>0.85 0.27 0.15 1</ambient><diffuse>0.85 0.27 0.15 1</diffuse><specular>0.1 0.1 0.1 1</specular></material></visual>
+    <visual name="epaule_g"><pose>0 0.2 1.37 0 0 0</pose><geometry><sphere><radius>0.08</radius></sphere></geometry><material><ambient>0.85 0.27 0.15 1</ambient><diffuse>0.85 0.27 0.15 1</diffuse><specular>0.1 0.1 0.1 1</specular></material></visual>
+    <visual name="manche_g"><pose>0 0.222 1.32 0.1 0 0</pose><geometry><capsule><radius>0.056</radius><length>0.06</length></capsule></geometry><material><ambient>0.85 0.27 0.15 1</ambient><diffuse>0.85 0.27 0.15 1</diffuse><specular>0.1 0.1 0.1 1</specular></material></visual>
+    <visual name="epaule_d"><pose>0 -0.2 1.37 0 0 0</pose><geometry><sphere><radius>0.08</radius></sphere></geometry><material><ambient>0.85 0.27 0.15 1</ambient><diffuse>0.85 0.27 0.15 1</diffuse><specular>0.1 0.1 0.1 1</specular></material></visual>
+    <visual name="manche_d"><pose>0 -0.222 1.32 -0.1 0 0</pose><geometry><capsule><radius>0.056</radius><length>0.06</length></capsule></geometry><material><ambient>0.85 0.27 0.15 1</ambient><diffuse>0.85 0.27 0.15 1</diffuse><specular>0.1 0.1 0.1 1</specular></material></visual>
+
+    <!-- Badge Eurobot -->
+    <visual name="cordon"><pose>0.1 0.06 1.35 0 -0.375 0</pose><geometry><cylinder><radius>0.004</radius><length>0.16</length></cylinder></geometry><material><ambient>0.1 0.35 0.8 1</ambient><diffuse>0.1 0.35 0.8 1</diffuse><specular>0.1 0.1 0.1 1</specular></material></visual>
+    <visual name="badge"><pose>0.119 0.07 1.22 0 0 0</pose><geometry><box><size>0.004 0.07 0.1</size></box></geometry><material><ambient>0.97 0.97 0.97 1</ambient><diffuse>0.97 0.97 0.97 1</diffuse><specular>0.1 0.1 0.1 1</specular></material></visual>
+    <visual name="badge_bande"><pose>0.1215 0.07 1.255 0 0 0</pose><geometry><box><size>0.002 0.07 0.025</size></box></geometry><material><ambient>0.1 0.35 0.8 1</ambient><diffuse>0.1 0.35 0.8 1</diffuse><specular>0.1 0.1 0.1 1</specular></material></visual>
+
+    <!-- Bras gauche (le long du corps) -->
+    <visual name="bras_g"><pose>0 0.225 1.25 0.1 0 0</pose><geometry><capsule><radius>0.045</radius><length>0.2</length></capsule></geometry><material><ambient>0.92 0.76 0.62 1</ambient><diffuse>0.92 0.76 0.62 1</diffuse><specular>0.1 0.1 0.1 1</specular></material></visual>
+    <visual name="coude_g"><pose>0 0.24 1.11 0 0 0</pose><geometry><sphere><radius>0.042</radius></sphere></geometry><material><ambient>0.92 0.76 0.62 1</ambient><diffuse>0.92 0.76 0.62 1</diffuse><specular>0.1 0.1 0.1 1</specular></material></visual>
+    <visual name="avant_bras_g"><pose>0.02 0.245 0.98 0 -0.15 0</pose><geometry><capsule><radius>0.04</radius><length>0.18</length></capsule></geometry><material><ambient>0.92 0.76 0.62 1</ambient><diffuse>0.92 0.76 0.62 1</diffuse><specular>0.1 0.1 0.1 1</specular></material></visual>
+    <visual name="main_g"><pose>0.035 0.25 0.83 0 0 0</pose><geometry><ellipsoid><radii>0.03 0.045 0.08</radii></ellipsoid></geometry><material><ambient>0.92 0.76 0.62 1</ambient><diffuse>0.92 0.76 0.62 1</diffuse><specular>0.1 0.1 0.1 1</specular></material></visual>
+
+    <!-- Bras droit (filme le match au telephone) -->
+    <visual name="bras_d"><pose>0 -0.225 1.25 -0.1 0 0</pose><geometry><capsule><radius>0.045</radius><length>0.2</length></capsule></geometry><material><ambient>0.92 0.76 0.62 1</ambient><diffuse>0.92 0.76 0.62 1</diffuse><specular>0.1 0.1 0.1 1</specular></material></visual>
+    <visual name="coude_d"><pose>0 -0.24 1.11 0 0 0</pose><geometry><sphere><radius>0.042</radius></sphere></geometry><material><ambient>0.92 0.76 0.62 1</ambient><diffuse>0.92 0.76 0.62 1</diffuse><specular>0.1 0.1 0.1 1</specular></material></visual>
+    <visual name="avant_bras_d"><pose>0.12 -0.23 1.13 0 1.4 0</pose><geometry><capsule><radius>0.04</radius><length>0.18</length></capsule></geometry><material><ambient>0.92 0.76 0.62 1</ambient><diffuse>0.92 0.76 0.62 1</diffuse><specular>0.1 0.1 0.1 1</specular></material></visual>
+    <visual name="main_d"><pose>0.27 -0.225 1.17 0 0 0</pose><geometry><ellipsoid><radii>0.035 0.045 0.06</radii></ellipsoid></geometry><material><ambient>0.92 0.76 0.62 1</ambient><diffuse>0.92 0.76 0.62 1</diffuse><specular>0.1 0.1 0.1 1</specular></material></visual>
+    <visual name="telephone"><pose>0.29 -0.21 1.22 0 -0.35 0</pose><geometry><box><size>0.012 0.075 0.15</size></box></geometry><material><ambient>0.12 0.12 0.13 1</ambient><diffuse>0.12 0.12 0.13 1</diffuse><specular>0.1 0.1 0.1 1</specular></material></visual>
+    <visual name="ecran"><pose>0.2834 -0.21 1.2176 0 -0.35 0</pose><geometry><box><size>0.002 0.065 0.135</size></box></geometry><material><ambient>0.35 0.65 1.0 1</ambient><diffuse>0.35 0.65 1.0 1</diffuse><specular>0.1 0.1 0.1 1</specular><emissive>0.21 0.39 0.60 1</emissive></material></visual>
+    <visual name="objectif"><pose>0.2794 -0.19 1.2694 0 1.2208 0</pose><geometry><cylinder><radius>0.008</radius><length>0.004</length></cylinder></geometry><material><ambient>0.02 0.02 0.02 1</ambient><diffuse>0.02 0.02 0.02 1</diffuse><specular>0.1 0.1 0.1 1</specular></material></visual>
+
+    <!-- Cou et tete -->
+    <visual name="cou"><pose>0 0 1.46 0 0 0</pose><geometry><cylinder><radius>0.05</radius><length>0.1</length></cylinder></geometry><material><ambient>0.92 0.76 0.62 1</ambient><diffuse>0.92 0.76 0.62 1</diffuse><specular>0.1 0.1 0.1 1</specular></material></visual>
+    <visual name="tete"><pose>0 0 1.6 0 0 0</pose><geometry><ellipsoid><radii>0.095 0.08 0.115</radii></ellipsoid></geometry><material><ambient>0.92 0.76 0.62 1</ambient><diffuse>0.92 0.76 0.62 1</diffuse><specular>0.1 0.1 0.1 1</specular></material></visual>
+    <visual name="cheveux"><pose>-0.012 0 1.645 0 0 0</pose><geometry><ellipsoid><radii>0.1 0.085 0.085</radii></ellipsoid></geometry><material><ambient>0.25 0.15 0.08 1</ambient><diffuse>0.25 0.15 0.08 1</diffuse><specular>0.1 0.1 0.1 1</specular></material></visual>
+    <visual name="oreille_g"><pose>0 0.08 1.6 0 0 0</pose><geometry><ellipsoid><radii>0.012 0.01 0.025</radii></ellipsoid></geometry><material><ambient>0.92 0.76 0.62 1</ambient><diffuse>0.92 0.76 0.62 1</diffuse><specular>0.1 0.1 0.1 1</specular></material></visual>
+    <visual name="oeil_g"><pose>0.08 0.032 1.615 0 0 0</pose><geometry><sphere><radius>0.013</radius></sphere></geometry><material><ambient>0.97 0.97 0.97 1</ambient><diffuse>0.97 0.97 0.97 1</diffuse><specular>0.1 0.1 0.1 1</specular></material></visual>
+    <visual name="pupille_g"><pose>0.09 0.032 1.615 0 0 0</pose><geometry><sphere><radius>0.006</radius></sphere></geometry><material><ambient>0.1 0.1 0.1 1</ambient><diffuse>0.1 0.1 0.1 1</diffuse><specular>0.1 0.1 0.1 1</specular></material></visual>
+    <visual name="sourcil_g"><pose>0.086 0.033 1.64 0 0 0</pose><geometry><box><size>0.006 0.03 0.006</size></box></geometry><material><ambient>0.25 0.15 0.08 1</ambient><diffuse>0.25 0.15 0.08 1</diffuse><specular>0.1 0.1 0.1 1</specular></material></visual>
+    <visual name="oreille_d"><pose>0 -0.08 1.6 0 0 0</pose><geometry><ellipsoid><radii>0.012 0.01 0.025</radii></ellipsoid></geometry><material><ambient>0.92 0.76 0.62 1</ambient><diffuse>0.92 0.76 0.62 1</diffuse><specular>0.1 0.1 0.1 1</specular></material></visual>
+    <visual name="oeil_d"><pose>0.08 -0.032 1.615 0 0 0</pose><geometry><sphere><radius>0.013</radius></sphere></geometry><material><ambient>0.97 0.97 0.97 1</ambient><diffuse>0.97 0.97 0.97 1</diffuse><specular>0.1 0.1 0.1 1</specular></material></visual>
+    <visual name="pupille_d"><pose>0.09 -0.032 1.615 0 0 0</pose><geometry><sphere><radius>0.006</radius></sphere></geometry><material><ambient>0.1 0.1 0.1 1</ambient><diffuse>0.1 0.1 0.1 1</diffuse><specular>0.1 0.1 0.1 1</specular></material></visual>
+    <visual name="sourcil_d"><pose>0.086 -0.033 1.64 0 0 0</pose><geometry><box><size>0.006 0.03 0.006</size></box></geometry><material><ambient>0.25 0.15 0.08 1</ambient><diffuse>0.25 0.15 0.08 1</diffuse><specular>0.1 0.1 0.1 1</specular></material></visual>
+    <visual name="nez"><pose>0.092 0 1.59 0 0 0</pose><geometry><ellipsoid><radii>0.02 0.013 0.022</radii></ellipsoid></geometry><material><ambient>0.92 0.76 0.62 1</ambient><diffuse>0.92 0.76 0.62 1</diffuse><specular>0.1 0.1 0.1 1</specular></material></visual>
+    <visual name="bouche"><pose>0.088 0 1.55 0 0 0</pose><geometry><box><size>0.006 0.04 0.008</size></box></geometry><material><ambient>0.65 0.25 0.25 1</ambient><diffuse>0.65 0.25 0.25 1</diffuse><specular>0.1 0.1 0.1 1</specular></material></visual>
+  </link>
+</model>
+</sdf>

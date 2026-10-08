@@ -42,8 +42,16 @@
   <model name="balise_3"><static>true</static><pose>3.094 1 0.25 0 0 0</pose><link name="link"><collision name="c"><geometry><cylinder><radius>0.05</radius><length>0.5</length></cylinder></geometry></collision><visual name="v"><geometry><cylinder><radius>0.05</radius><length>0.5</length></cylinder></geometry><material><ambient>0.1 0.1 0.1 1</ambient><diffuse>0.1 0.1 0.1 1</diffuse><specular>0.1 0.1 0.1 1</specular></material></visual></link></model>
   
   <model name="obstacle1"><static>true</static><pose>1.5 1 0.25 0 0 0</pose><link name="link"><collision name="c"><geometry><cylinder><radius>0.05</radius><length>0.5</length></cylinder></geometry></collision><visual name="v"><geometry><cylinder><radius>0.05</radius><length>0.5</length></cylinder></geometry><material><ambient>0.1 0.1 0.1 1</ambient><diffuse>0.1 0.1 0.1 1</diffuse><specular>0.1 0.1 0.1 1</specular></material></visual></link></model>
-  
   <model name="obstacle2"><static>true</static><pose>1.75 1 0.25 0 0 0</pose><link name="link"><collision name="c"><geometry><cylinder><radius>0.05</radius><length>0.5</length></cylinder></geometry></collision><visual name="v"><geometry><cylinder><radius>0.05</radius><length>0.5</length></cylinder></geometry><material><ambient>0.1 0.1 0.1 1</ambient><diffuse>0.1 0.1 0.1 1</diffuse><specular>0.1 0.1 0.1 1</specular></material></visual></link></model>
+
+  <include><uri>model://humain</uri><name>humain_1</name><pose>0.7 -0.45 -1.0 0 0 1.066</pose></include>
+  <include><uri>model://humain</uri><name>humain_2</name><pose>2.2 -0.5 -1.0 0 0 2.007</pose></include>
+  <include><uri>model://humain</uri><name>humain_3</name><pose>1.1 2.5 -1.0 0 0 -1.310</pose></include>
+  <include><uri>model://humain</uri><name>humain_4</name><pose>2.6 2.45 -1.0 0 0 -2.219</pose></include>
+  <include><uri>model://humain</uri><name>humain_5</name><pose>-0.55 0.9 -1.0 0 0 0.049</pose></include>
+  <include><uri>model://humain</uri><name>humain_6</name><pose>-0.6 1.6 -1.0 0 0 -0.278</pose></include>
+  <include><uri>model://humain</uri><name>humain_7</name><pose>3.55 0.4 -1.0 0 0 2.857</pose></include>
+  <include><uri>model://humain</uri><name>humain_8</name><pose>3.5 1.7 -1.0 0 0 -2.805</pose></include>
 
   <model name="robot_omni"><pose>0.5 1 0 0 0 0</pose>
 
