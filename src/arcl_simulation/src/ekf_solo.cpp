@@ -324,7 +324,7 @@ class EKFSolo : public rclcpp::Node{
                                 }
 
                                 cluster_centers.push_back({z_r, z_phi});
-                                publish_markers(scan_msg, cluster_center, j);
+                                publish_balise_markers(scan_msg, cluster_center, j);
                         }
 
                         obstacles_pub_->publish(out);
@@ -541,7 +541,7 @@ class EKFSolo : public rclcpp::Node{
                 }
 
                 rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr balise_point_pub_;
-                void publish_markers(const sensor_msgs::msg::LaserScan::SharedPtr scan_msg, std::vector<float> cluster_center, int j){
+                void publish_balise_markers(const sensor_msgs::msg::LaserScan::SharedPtr scan_msg, std::vector<float> cluster_center, int j){
                     visualization_msgs::msg::Marker marker;
                     marker.header.frame_id = scan_msg->header.frame_id;
                     marker.header.stamp = scan_msg->header.stamp;
@@ -556,8 +556,8 @@ class EKFSolo : public rclcpp::Node{
                     marker.scale.x = 2 * r_balise;
                     marker.scale.y = 2 * r_balise;
                     marker.scale.z = 1.0;
-                    marker.color.r = 1.0;
-                    marker.color.g = 0.0;
+                    marker.color.r = 0.0;
+                    marker.color.g = 1.0;
                     marker.color.b = 0.0;
                     marker.color.a = 1.0;
                     marker.lifetime = rclcpp::Duration::from_seconds(0.2);

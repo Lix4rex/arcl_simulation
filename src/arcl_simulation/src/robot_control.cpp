@@ -5,6 +5,7 @@
 #include "sensor_msgs/msg/laser_scan.hpp"
 #include "robot_msgs/msg/obstacle_array.hpp"
 #include "nav_msgs/msg/path.hpp"
+#include "visualization_msgs/msg/marker.hpp"
 
 #include <cmath>
 #include <algorithm>
@@ -71,6 +72,10 @@ class RobotControl : public rclcpp::Node{
                         obstacles_sub_ = this->create_subscription<robot_msgs::msg::ObstacleArray>(
                                 "/obstacles_scan", 10,
                                 std::bind(&RobotControl::obstacles_callback, this, std::placeholders::_1)
+                        );
+
+                        obstacle_point_pub_ = this->create_publisher<visualization_msgs::msg::Marker>(
+                                "/obstacle_point", 10
                         );
 
                         path_pub_ = this->create_publisher<nav_msgs::msg::Path>(
@@ -305,8 +310,11 @@ class RobotControl : public rclcpp::Node{
                         obstacles.clear();
                         obstacles.reserve(cluster_msg->obstacles.size());
 
+                        int i=0;
                         for (const auto & obs : cluster_msg->obstacles) {
+                                publish_obstacle_markers(cluster_msg, obs.x, obs.y, 0.75*obs.radius, i);
                                 obstacles.emplace_back(obs);
+                                i++;
                         }
                 }
 
@@ -483,6 +491,31 @@ class RobotControl : public rclcpp::Node{
 
                         msg.data = w4;
                         cmd_vel_wheel4_pub_ ->publish(msg);
+                }
+
+
+                rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr obstacle_point_pub_;
+                void publish_obstacle_markers(const robot_msgs::msg::ObstacleArray::SharedPtr obstacle_msg, float x, float y, float radius, int i){
+                    visualization_msgs::msg::Marker marker;
+                    marker.header.frame_id = obstacle_msg->header.frame_id;
+                    marker.header.stamp = obstacle_msg->header.stamp;
+                    marker.ns = "obstacles";
+                    marker.id = i;
+                    marker.type = visualization_msgs::msg::Marker::CYLINDER;
+                    marker.action = visualization_msgs::msg::Marker::ADD;
+                    marker.pose.position.x = x;
+                    marker.pose.position.y = y;
+                    marker.pose.position.z = 0.0;
+                    marker.pose.orientation.w = 1.0;
+                    marker.scale.x = radius;
+                    marker.scale.y = radius;
+                    marker.scale.z = 1.0;
+                    marker.color.r = 1.0;
+                    marker.color.g = 0.0;
+                    marker.color.b = 0.0;
+                    marker.color.a = 1.0;
+                    marker.lifetime = rclcpp::Duration::from_seconds(0.2);
+                    obstacle_point_pub_->publish(marker);
                 }
 };
 

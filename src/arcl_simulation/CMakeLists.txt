@@ -19,7 +19,7 @@ find_package(nav_msgs REQUIRED)
 
 add_executable(robot_control src/robot_control.cpp)
 target_include_directories(robot_control PRIVATE ${EIGEN3_INCLUDE_DIR})
-ament_target_dependencies(robot_control rclcpp std_msgs robot_msgs geometry_msgs sensor_msgs nav_msgs)
+ament_target_dependencies(robot_control rclcpp std_msgs robot_msgs geometry_msgs sensor_msgs nav_msgs visualization_msgs)
 
 add_executable(ekf_solo src/ekf_solo.cpp)
 target_include_directories(ekf_solo PRIVATE ${EIGEN3_INCLUDE_DIR})

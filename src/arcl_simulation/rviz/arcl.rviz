@@ -310,6 +310,19 @@ Visualization Manager:
         Reliability Policy: Reliable
         Value: /trajectoire
       Value: true
+    - Class: rviz_default_plugins/Marker
+      Enabled: true
+      Name: Marker
+      Namespaces:
+        obstacles: true
+      Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        Filter size: 10
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /obstacle_point
+      Value: true
   Enabled: true
   Global Options:
     Background Color: 48; 48; 48
@@ -335,7 +348,7 @@ Visualization Manager:
   Views:
     Current:
       Class: rviz_default_plugins/Orbit
-      Distance: 5.83417272567749
+      Distance: 2.384284019470215
       Enable Stereo Rendering:
         Stereo Eye Separation: 0.05999999865889549
         Stereo Focal Distance: 1
@@ -350,10 +363,10 @@ Visualization Manager:
       Invert Z Axis: false
       Name: Current View
       Near Clip Distance: 0.009999999776482582
-      Pitch: 1.339796543121338
+      Pitch: 0.869796633720398
       Target Frame: <Fixed Frame>
       Value: Orbit (rviz_default_plugins)
-      Yaw: 4.630013942718506
+      Yaw: 5.11501407623291
     Saved: ~
 Window Geometry:
   Displays:
