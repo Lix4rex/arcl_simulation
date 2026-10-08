@@ -104,38 +104,22 @@ class RobotControl : public rclcpp::Node{
                 float secu_marge = 0.1f;
 
                 float v_max_trajectoire = 0.2;
+                float v_angulaire_max_trajectire = 2.0;
                 float a_max_trajectoire = 0.8;
 
                 static const int nb_points = 15;
                 int nb_pas_table = 6000;
 
+
                 float Kp = 2.0;
-                float Ki = 0.2;
-                float Kd = 0.0;
                 float Kp_theta = 1.0;
-                float Ki_theta = 0.67;
-                float Kd_theta = 0.0;
 
-                float vitesse_max = v_max_trajectoire;
-                float vitesse_angulaire_max = 2.0;
-                float integrale_max = 0.02;
-
-                float zone_integration_position = 0.05;
-                float zone_integration_cap = 0.1;
-
-                float tolerance_position = 0.005;
-                float tolerance_cap = 0.0175;
-
-                float dt = 0.02;
 
                 bool position_received = false;
                 bool goal_active = false;
 
                 float x = 0, y = 0, theta = 0;
                 float x_goal = 0, y_goal = 0, theta_goal = 0;
-
-                float integrale_x = 0, integrale_y = 0, integrale_theta = 0;
-                float erreur_precedente_x = 0, erreur_precedente_y = 0, erreur_precedente_theta = 0;
 
                 rclcpp::Subscription<geometry_msgs::msg::PoseStamped>::SharedPtr robot_position_sub_;
                 void robot_position_callback(const geometry_msgs::msg::PoseStamped::SharedPtr position){
@@ -301,13 +285,8 @@ class RobotControl : public rclcpp::Node{
                         y_goal = goal->pose.position.y;
                         theta_goal = 2*atan2(goal->pose.orientation.z, goal->pose.orientation.w);
 
-                        integrale_x = 0; integrale_y = 0; integrale_theta = 0;
-                        erreur_precedente_x = x_goal - x;
-                        erreur_precedente_y = y_goal - y;
-                        erreur_precedente_theta = wrap(theta_goal - theta);
-                        goal_active = true;
-
                         create_trajectory();
+                        goal_active = true;
 
                         RCLCPP_INFO(this->get_logger(), "Nouvel objectif : (%.3f, %.3f, %.1f°), trajectoire de %.3f m en %.2f s", x_goal, y_goal, theta_goal*180/M_PI, longueur_trajectoire, duree_trajectoire);
                 }
@@ -374,7 +353,6 @@ class RobotControl : public rclcpp::Node{
 
                                                 if (distance_obstacle > distance_evitement) continue;
 
-
                                                 float perp_x = -dir_y;
                                                 float perp_y =  dir_x;
                                                 float position_laterale_centre = vx*perp_x + vy*perp_y; // produit scalaire du vecteur (point -> obstacle) / (vecteur normal à la trajectoire)
@@ -428,70 +406,17 @@ class RobotControl : public rclcpp::Node{
                         path_pub_->publish(chemin);
                 }
 
-
                 rclcpp::TimerBase::SharedPtr control_timer_;
-                void control_loop(){
-                        if (!position_received || !goal_active) return;
-
-                        float erreur_x = x_goal - x;
-                        float erreur_y = y_goal - y;
-                        float erreur_theta = wrap(theta_goal - theta); 
-
-                        if (sqrt(erreur_x*erreur_x + erreur_y*erreur_y) < tolerance_position && std::abs(erreur_theta) < tolerance_cap){
-                                goal_active = false;
-                                send_wheel_speeds(0, 0, 0, 0);
-                                RCLCPP_INFO(this->get_logger(), "Objectif atteint");
-                                return;
-                        }
-
-                        if (sqrt(erreur_x*erreur_x + erreur_y*erreur_y) < zone_integration_position){
-                                integrale_x = std::clamp(integrale_x + erreur_x*dt, -integrale_max, integrale_max);
-                                integrale_y = std::clamp(integrale_y + erreur_y*dt, -integrale_max, integrale_max);
-                        } else {
-                                integrale_x = 0;
-                                integrale_y = 0;
-                        }
-                        if (std::abs(erreur_theta) < zone_integration_cap){
-                                integrale_theta = std::clamp(integrale_theta + erreur_theta*dt, -integrale_max, integrale_max);
-                        } else {
-                                integrale_theta = 0;
-                        }
-
-                        float derivee_x = (erreur_x - erreur_precedente_x) / dt;
-                        float derivee_y = (erreur_y - erreur_precedente_y) / dt;
-                        float derivee_theta = wrap(erreur_theta - erreur_precedente_theta) / dt;
-                        erreur_precedente_x = erreur_x;
-                        erreur_precedente_y = erreur_y;
-                        erreur_precedente_theta = erreur_theta;
-
-                        float vx_table = Kp*erreur_x + Ki*integrale_x + Kd*derivee_x;
-                        float vy_table = Kp*erreur_y + Ki*integrale_y + Kd*derivee_y;
-                        float omega = Kp_theta*erreur_theta + Ki_theta*integrale_theta + Kd_theta*derivee_theta;
-
-                        float vitesse = sqrt(vx_table*vx_table + vy_table*vy_table);
-                        if (vitesse > vitesse_max){
-                                vx_table = vx_table * vitesse_max / vitesse;
-                                vy_table = vy_table * vitesse_max / vitesse;
-                        }
-                        omega = std::clamp(omega, -vitesse_angulaire_max, vitesse_angulaire_max);
-
-                        send_robot_speed(vx_table, vy_table, omega);
-                }
-
                 void trajectory_control_loop(){
                         if (!position_received || !goal_active) return;
-
-                        if (!trajectoire_active){
-                                control_loop();
-                                return;
-                        }
 
                         // 1. temps écoulé depuis le départ (horloge de la simulation si use_sim_time = true)
                         float t = this->now().seconds() - t_debut_trajectoire;
                         if (t >= duree_trajectoire){
                                 trajectoire_active = false;
-                                RCLCPP_INFO(this->get_logger(), "Fin de trajectoire, approche finale");
-                                control_loop();
+                                RCLCPP_INFO(this->get_logger(), "Fin de trajectoire, objectif atteint");
+                                goal_active = false;
+                                send_wheel_speeds(0, 0, 0, 0);
                                 return;
                         }
 
@@ -519,11 +444,11 @@ class RobotControl : public rclcpp::Node{
                         float omega = omega_ref + Kp_theta*wrap(theta_ref - theta);
 
                         float vitesse = sqrt(vx_table*vx_table + vy_table*vy_table);
-                        if (vitesse > vitesse_max){
-                                vx_table = vx_table * vitesse_max / vitesse;
-                                vy_table = vy_table * vitesse_max / vitesse;
+                        if (vitesse > v_max_trajectoire){
+                                vx_table = vx_table * v_max_trajectoire / vitesse;
+                                vy_table = vy_table * v_max_trajectoire / vitesse;
                         }
-                        omega = std::clamp(omega, -vitesse_angulaire_max, vitesse_angulaire_max);
+                        omega = std::clamp(omega, -v_angulaire_max_trajectire, v_angulaire_max_trajectire);
 
                         send_robot_speed(vx_table, vy_table, omega);
                 }
