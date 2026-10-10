@@ -1,0 +1,10 @@
+newmtl grande_face
+Ka 1 1 1
+Kd 1 1 1
+Ks 0.02 0.02 0.02
+map_Kd pierre_face_aruco13.png
+
+newmtl bout
+Ka 0.75 0.63 0.45
+Kd 0.75 0.63 0.45
+Ks 0.02 0.02 0.02

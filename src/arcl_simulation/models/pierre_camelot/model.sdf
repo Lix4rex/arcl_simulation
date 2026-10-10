@@ -1,0 +1,12 @@
+<?xml version="1.0"?>
+<sdf version="1.9">
+  <model name="pierre_camelot">
+    <!-- Pierre Eurobot 2027 : boîte carton 110 x 110 x 320 mm, grand axe selon z (debout),
+         ArUco 4x4_50 ID 13 de 80 mm centré sur les 4 grandes faces. -->
+    <link name="link">
+      <inertial><mass>0.09</mass><inertia><ixx>8.5875e-04</ixx><ixy>0</ixy><ixz>0</ixz><iyy>8.5875e-04</iyy><iyz>0</iyz><izz>1.8150e-04</izz></inertia></inertial>
+      <collision name="c"><geometry><box><size>0.11 0.11 0.32</size></box></geometry><surface><friction><ode><mu>0.6</mu><mu2>0.6</mu2></ode></friction></surface></collision>
+      <visual name="v"><geometry><mesh><uri>model://pierre_camelot/meshes/pierre_camelot.obj</uri></mesh></geometry></visual>
+    </link>
+  </model>
+</sdf>
