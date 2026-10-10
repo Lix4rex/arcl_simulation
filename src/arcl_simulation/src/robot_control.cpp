@@ -54,11 +54,6 @@ class RobotControl : public rclcpp::Node{
                                 "/robot_omni/roue_4/cmd_vel", 10
                         );
 
-                        wheel_commands_sub_ = this->create_subscription<robot_msgs::msg::WheelCommands>(
-                                "/wheel_commands", 10,
-                                std::bind(&RobotControl::wheel_commands_callback, this, std::placeholders::_1)
-                        );
-
                         robot_position_sub_ = this->create_subscription<geometry_msgs::msg::PoseStamped>(
                                 "/pose_estimation", 10,
                                 std::bind(&RobotControl::robot_position_callback, this, std::placeholders::_1)
@@ -95,13 +90,6 @@ class RobotControl : public rclcpp::Node{
                 rclcpp::Publisher<std_msgs::msg::Float64>::SharedPtr cmd_vel_wheel2_pub_;
                 rclcpp::Publisher<std_msgs::msg::Float64>::SharedPtr cmd_vel_wheel3_pub_;
                 rclcpp::Publisher<std_msgs::msg::Float64>::SharedPtr cmd_vel_wheel4_pub_;
-
-                rclcpp::Subscription<robot_msgs::msg::WheelCommands>::SharedPtr wheel_commands_sub_;
-                void wheel_commands_callback(const robot_msgs::msg::WheelCommands::SharedPtr wheel_commands){
-                        goal_active = false;
-                        trajectoire_active = false;
-                        send_wheel_speeds(wheel_commands->wheel1, wheel_commands->wheel2, wheel_commands->wheel3, wheel_commands->wheel4);
-                }
 
                 float wheel_radius = 0.03;
                 float wheel_distance_from_center = 0.162635;
@@ -427,7 +415,7 @@ class RobotControl : public rclcpp::Node{
                                 trajectoire_active = false;
                                 RCLCPP_INFO(this->get_logger(), "Fin de trajectoire, objectif atteint");
                                 goal_active = false;
-                                send_wheel_speeds(0, 0, 0, 0);
+                                send_robot_speed(0.0, 0.0, 0.0);
                                 return;
                         }
 

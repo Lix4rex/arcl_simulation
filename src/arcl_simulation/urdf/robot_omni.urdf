@@ -2,32 +2,50 @@
 <!-- Généré avec le monde SDF : mêmes noms de liens et d'articulations, mêmes cotes. Ne pas éditer à la main. -->
 <robot name="robot_omni">
   <material name="gris"><color rgba="0.25 0.3 0.35 1"/></material>
+  <material name="anthracite"><color rgba="0.3 0.3 0.3 1"/></material>
   <material name="noir"><color rgba="0.12 0.12 0.12 1"/></material>
   <material name="rouge"><color rgba="0.9 0.15 0.15 1"/></material>
   <material name="jaune"><color rgba="0.95 0.75 0.1 1"/></material>
-  
+  <material name="bleu_objectif"><color rgba="0.05 0.05 0.2 1"/></material>
+
   <!-- base_link : centre du robot au niveau du sol, x vers l'avant, y vers la gauche -->
   <link name="base_link"/>
-  
-  <link name="chassis"><visual><geometry><box size="0.2 0.2 0.05"/></geometry><material name="gris"/></visual><visual><origin xyz="0.07 0 0.028"/><geometry><box size="0.04 0.02 0.006"/></geometry><material name="rouge"/></visual><visual><origin xyz="0 0 0.205"/><geometry><cylinder radius="0.01" length="0.36"/></geometry><material name="gris"/></visual><collision><geometry><box size="0.2 0.2 0.05"/></geometry></collision><inertial><mass value="3"/><inertia ixx="0.010625" ixy="0" ixz="0" iyy="0.010625" iyz="0" izz="0.02"/></inertial></link>
+
+  <link name="chassis">
+    <visual><geometry><box size="0.2 0.2 0.05"/></geometry><material name="gris"/></visual>
+    <visual><origin xyz="0.04 0 0.028"/><geometry><box size="0.04 0.02 0.006"/></geometry><material name="rouge"/></visual>
+    <visual><origin xyz="0 0 0.205"/><geometry><cylinder radius="0.01" length="0.36"/></geometry><material name="gris"/></visual>
+    <visual><origin xyz="0.085 0 0.085"/><geometry><box size="0.03 0.06 0.12"/></geometry><material name="anthracite"/></visual>
+    <visual><origin xyz="0.09 0 0.1575"/><geometry><box size="0.02 0.05 0.025"/></geometry><material name="noir"/></visual>
+    <visual><origin xyz="0.105 0 0.1575" rpy="0 1.5708 0"/><geometry><cylinder radius="0.008" length="0.01"/></geometry><material name="bleu_objectif"/></visual>
+    <collision><geometry><box size="0.2 0.2 0.05"/></geometry></collision>
+    <collision><origin xyz="0.085 0 0.085"/><geometry><box size="0.03 0.06 0.12"/></geometry></collision>
+    <inertial><mass value="3"/><inertia ixx="0.010625" ixy="0" ixz="0" iyy="0.010625" iyz="0" izz="0.02"/></inertial>
+  </link>
   <joint name="chassis_joint" type="fixed"><parent link="base_link"/><child link="chassis"/><origin xyz="0 0 0.045"/></joint>
-  
+
   <link name="roue_1"><visual><geometry><cylinder radius="0.03" length="0.025"/></geometry><material name="noir"/></visual><visual><geometry><box size="0.048 0.008 0.02625"/></geometry><material name="jaune"/></visual><collision><geometry><cylinder radius="0.03" length="0.025"/></geometry></collision><inertial><mass value="0.1"/><inertia ixx="2.77083e-05" ixy="0" ixz="0" iyy="2.77083e-05" iyz="0" izz="4.5e-05"/></inertial></link>
   <joint name="roue_1_joint" type="continuous"><parent link="base_link"/><child link="roue_1"/><origin xyz="0.115 0.115 0.03" rpy="0 1.5708 0.785398"/><axis xyz="0 0 -1"/></joint>
-  
+
   <link name="roue_2"><visual><geometry><cylinder radius="0.03" length="0.025"/></geometry><material name="noir"/></visual><visual><geometry><box size="0.048 0.008 0.02625"/></geometry><material name="jaune"/></visual><collision><geometry><cylinder radius="0.03" length="0.025"/></geometry></collision><inertial><mass value="0.1"/><inertia ixx="2.77083e-05" ixy="0" ixz="0" iyy="2.77083e-05" iyz="0" izz="4.5e-05"/></inertial></link>
   <joint name="roue_2_joint" type="continuous"><parent link="base_link"/><child link="roue_2"/><origin xyz="-0.115 0.115 0.03" rpy="0 1.5708 2.35619"/><axis xyz="0 0 -1"/></joint>
-  
+
   <link name="roue_3"><visual><geometry><cylinder radius="0.03" length="0.025"/></geometry><material name="noir"/></visual><visual><geometry><box size="0.048 0.008 0.02625"/></geometry><material name="jaune"/></visual><collision><geometry><cylinder radius="0.03" length="0.025"/></geometry></collision><inertial><mass value="0.1"/><inertia ixx="2.77083e-05" ixy="0" ixz="0" iyy="2.77083e-05" iyz="0" izz="4.5e-05"/></inertial></link>
   <joint name="roue_3_joint" type="continuous"><parent link="base_link"/><child link="roue_3"/><origin xyz="-0.115 -0.115 0.03" rpy="0 1.5708 3.92699"/><axis xyz="0 0 -1"/></joint>
-  
+
   <link name="roue_4"><visual><geometry><cylinder radius="0.03" length="0.025"/></geometry><material name="noir"/></visual><visual><geometry><box size="0.048 0.008 0.02625"/></geometry><material name="jaune"/></visual><collision><geometry><cylinder radius="0.03" length="0.025"/></geometry></collision><inertial><mass value="0.1"/><inertia ixx="2.77083e-05" ixy="0" ixz="0" iyy="2.77083e-05" iyz="0" izz="4.5e-05"/></inertial></link>
   <joint name="roue_4_joint" type="continuous"><parent link="base_link"/><child link="roue_4"/><origin xyz="0.115 -0.115 0.03" rpy="0 1.5708 5.49779"/><axis xyz="0 0 -1"/></joint>
-  
+
   <link name="lidar"><visual><geometry><cylinder radius="0.035" length="0.04"/></geometry><material name="noir"/></visual></link>
   <joint name="lidar_joint" type="fixed"><parent link="base_link"/><child link="lidar"/><origin xyz="0 0 0.43"/></joint>
-  
+
   <link name="imu"/>
   <joint name="imu_joint" type="fixed"><parent link="base_link"/><child link="imu"/><origin xyz="0 0 0.045"/></joint>
-  
+
+  <link name="camera"/>
+  <joint name="camera_joint" type="fixed"><parent link="base_link"/><child link="camera"/><origin xyz="0.11 0 0.2025" rpy="0 0.2 0"/></joint>
+
+  <link name="camera_optical"/>
+  <joint name="camera_optical_joint" type="fixed"><parent link="camera"/><child link="camera_optical"/><origin xyz="0 0 0" rpy="-1.5708 0 -1.5708"/></joint>
+
 </robot>

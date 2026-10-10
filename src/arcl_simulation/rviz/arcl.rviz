@@ -7,7 +7,7 @@ Panels:
         - /Global Options1
         - /Pose vraie1/Shape1
       Splitter Ratio: 0.5
-    Tree Height: 373
+    Tree Height: 230
   - Class: rviz_common/Views
     Expanded:
       - /Current View1
@@ -35,6 +35,14 @@ Visualization Manager:
         Expand Tree: false
         Link Tree Style: Links in Alphabetic Order
         base_link:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+        camera:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+        camera_optical:
           Alpha: 1
           Show Axes: false
           Show Trail: false
@@ -89,6 +97,10 @@ Visualization Manager:
         All Enabled: true
         base_link:
           Value: true
+        camera:
+          Value: true
+        camera_optical:
+          Value: true
         chassis:
           Value: true
         imu:
@@ -113,6 +125,9 @@ Visualization Manager:
       Tree:
         map:
           base_link:
+            camera:
+              camera_optical:
+                {}
             chassis:
               {}
             imu:
@@ -323,6 +338,20 @@ Visualization Manager:
         Reliability Policy: Reliable
         Value: /obstacle_point
       Value: true
+    - Class: rviz_default_plugins/Image
+      Enabled: true
+      Max Value: 1
+      Median window: 5
+      Min Value: 0
+      Name: Image
+      Normalize Range: true
+      Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /camera/image
+      Value: true
   Enabled: true
   Global Options:
     Background Color: 48; 48; 48
@@ -348,16 +377,16 @@ Visualization Manager:
   Views:
     Current:
       Class: rviz_default_plugins/Orbit
-      Distance: 7.4052252769470215
+      Distance: 4.070737361907959
       Enable Stereo Rendering:
         Stereo Eye Separation: 0.05999999865889549
         Stereo Focal Distance: 1
         Swap Stereo Eyes: false
         Value: false
       Focal Point:
-        X: 1.973105788230896
-        Y: 1.1643446683883667
-        Z: 0.024785876274108887
+        X: 1.4043587446212769
+        Y: 1.2318634986877441
+        Z: 0.06281274557113647
       Focal Shape Fixed Size: true
       Focal Shape Size: 0.05000000074505806
       Invert Z Axis: false
@@ -370,13 +399,15 @@ Visualization Manager:
     Saved: ~
 Window Geometry:
   Displays:
-    collapsed: true
+    collapsed: false
   Height: 1011
-  Hide Left Dock: true
+  Hide Left Dock: false
   Hide Right Dock: false
-  QMainWindow State: 000000ff00000000fd00000001000000000000019b0000039dfc0200000002fb000000100044006900730070006c006100790073000000003b000002f7000000c700fffffffb0000000a005600690065007700730000000338000000a0000000a000ffffff000003c00000039d00000004000000040000000800000008fc0000000100000002000000010000000a0054006f006f006c00730100000000ffffffff0000000000000000
+  Image:
+    collapsed: false
+  QMainWindow State: 000000ff00000000fd00000001000000000000019b0000039dfc0200000003fb000000100044006900730070006c006100790073010000003b00000167000000c700fffffffb0000000a0049006d00610067006501000001a8000002300000001600fffffffb0000000a005600690065007700730000000271000000a0000000a000ffffff000003f50000039d00000004000000040000000800000008fc0000000100000002000000010000000a0054006f006f006c00730100000000ffffffff0000000000000000
   Views:
-    collapsed: true
-  Width: 960
-  X: 960
-  Y: 32
+    collapsed: false
+  Width: 1430
+  X: 490
+  Y: 44
