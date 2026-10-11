@@ -3,7 +3,7 @@
   Table Eurobot 3 m x 2 m avec ses bordures, 3 balises fixes cylindriques hors de la table,
   et un robot holonome à 4 roues omni aux coins, tournées de 45° (configuration en X).
   Le robot porte un lidar sur mât et une caméra frontale posée au ras du châssis.
-  Pierres de la Coupe de France / Eurobot 2027 (La légende de Camelot) avec ArUco 13 : modèle pierre_camelot (dossier models/).
+  Pierres de la Coupe de France / Eurobot 2027 (La légende de Camelot) dans leurs 10 carrières (3 pierres couchées empilées), ArUco 13 : modèle pierre_camelot (dossier models/).
   Repère monde : origine dans un coin intérieur de l'arène, X le long des 3 m, Y le long des 2 m, Z vers le haut.
   Écrit pour Gazebo Harmonic (gz sim) / ROS 2 Jazzy. Lancer : gz sim arene_omni.sdf
 -->
@@ -43,12 +43,46 @@
   <model name="balise_2"><static>true</static><pose>-0.094 1.95 0.25 0 0 0</pose><link name="link"><collision name="c"><geometry><cylinder><radius>0.05</radius><length>0.5</length></cylinder></geometry></collision><visual name="v"><geometry><cylinder><radius>0.05</radius><length>0.5</length></cylinder></geometry><material><ambient>0.1 0.1 0.1 1</ambient><diffuse>0.1 0.1 0.1 1</diffuse><specular>0.1 0.1 0.1 1</specular></material></visual></link></model>
   <model name="balise_3"><static>true</static><pose>3.094 1 0.25 0 0 0</pose><link name="link"><collision name="c"><geometry><cylinder><radius>0.05</radius><length>0.5</length></cylinder></geometry></collision><visual name="v"><geometry><cylinder><radius>0.05</radius><length>0.5</length></cylinder></geometry><material><ambient>0.1 0.1 0.1 1</ambient><diffuse>0.1 0.1 0.1 1</diffuse><specular>0.1 0.1 0.1 1</specular></material></visual></link></model>
   
+  <!-- Obstacles de test, désactivés :
   <model name="obstacle1"><static>true</static><pose>1.5 1 0.25 0 0 0</pose><link name="link"><collision name="c"><geometry><cylinder><radius>0.05</radius><length>0.5</length></cylinder></geometry></collision><visual name="v"><geometry><cylinder><radius>0.05</radius><length>0.5</length></cylinder></geometry><material><ambient>0.1 0.1 0.1 1</ambient><diffuse>0.1 0.1 0.1 1</diffuse><specular>0.1 0.1 0.1 1</specular></material></visual></link></model>
   <model name="obstacle2"><static>true</static><pose>1.75 1 0.25 0 0 0</pose><link name="link"><collision name="c"><geometry><cylinder><radius>0.05</radius><length>0.5</length></cylinder></geometry></collision><visual name="v"><geometry><cylinder><radius>0.05</radius><length>0.5</length></cylinder></geometry><material><ambient>0.1 0.1 0.1 1</ambient><diffuse>0.1 0.1 0.1 1</diffuse><specular>0.1 0.1 0.1 1</specular></material></visual></link></model>
+  -->
 
 
-  <!-- Pierre Eurobot 2027 (carton 320 x 110 x 110 mm, ArUco 13), debout devant le robot -->
-  <include><uri>model://pierre_camelot</uri><name>pierre</name><pose>1.0 1.1 0.16 -1.57 0 0</pose></include>
+  <!-- Pierres Eurobot 2027 : 10 carrières, chacune avec 3 pierres couchées empilées (plan G.1 du règlement BETA 0.4).
+       Boîtes carton 320 x 110 x 110 mm, ArUco 4x4_50 ID 13 (70 mm) sur les 4 grandes faces.
+       Le modèle est debout (grand axe z) : pitch 1.5708 -> couché selon X, roll 1.5708 -> couché selon Y.
+       Hauteurs 0.0551 / 0.1662 / 0.2773 : 1 mm de jeu entre pierres pour éviter les interpénétrations au démarrage. -->
+  <include><uri>model://pierre_camelot</uri><name>pierre_centre_sud_1</name><pose>1.500 0.505 0.0551 1.5708 0 0</pose></include>
+  <include><uri>model://pierre_camelot</uri><name>pierre_centre_sud_2</name><pose>1.500 0.505 0.1662 1.5708 0 0</pose></include>
+  <include><uri>model://pierre_camelot</uri><name>pierre_centre_sud_3</name><pose>1.500 0.505 0.2773 1.5708 0 0</pose></include>
+  <include><uri>model://pierre_camelot</uri><name>pierre_centre_nord_1</name><pose>1.500 1.495 0.0551 1.5708 0 0</pose></include>
+  <include><uri>model://pierre_camelot</uri><name>pierre_centre_nord_2</name><pose>1.500 1.495 0.1662 1.5708 0 0</pose></include>
+  <include><uri>model://pierre_camelot</uri><name>pierre_centre_nord_3</name><pose>1.500 1.495 0.2773 1.5708 0 0</pose></include>
+  <include><uri>model://pierre_camelot</uri><name>pierre_bord_sud_1_1</name><pose>0.750 0.057 0.0551 0 1.5708 0</pose></include>
+  <include><uri>model://pierre_camelot</uri><name>pierre_bord_sud_1_2</name><pose>0.750 0.057 0.1662 0 1.5708 0</pose></include>
+  <include><uri>model://pierre_camelot</uri><name>pierre_bord_sud_1_3</name><pose>0.750 0.057 0.2773 0 1.5708 0</pose></include>
+  <include><uri>model://pierre_camelot</uri><name>pierre_bord_sud_2_1</name><pose>1.250 0.057 0.0551 0 1.5708 0</pose></include>
+  <include><uri>model://pierre_camelot</uri><name>pierre_bord_sud_2_2</name><pose>1.250 0.057 0.1662 0 1.5708 0</pose></include>
+  <include><uri>model://pierre_camelot</uri><name>pierre_bord_sud_2_3</name><pose>1.250 0.057 0.2773 0 1.5708 0</pose></include>
+  <include><uri>model://pierre_camelot</uri><name>pierre_bord_sud_3_1</name><pose>1.750 0.057 0.0551 0 1.5708 0</pose></include>
+  <include><uri>model://pierre_camelot</uri><name>pierre_bord_sud_3_2</name><pose>1.750 0.057 0.1662 0 1.5708 0</pose></include>
+  <include><uri>model://pierre_camelot</uri><name>pierre_bord_sud_3_3</name><pose>1.750 0.057 0.2773 0 1.5708 0</pose></include>
+  <include><uri>model://pierre_camelot</uri><name>pierre_bord_sud_4_1</name><pose>2.250 0.057 0.0551 0 1.5708 0</pose></include>
+  <include><uri>model://pierre_camelot</uri><name>pierre_bord_sud_4_2</name><pose>2.250 0.057 0.1662 0 1.5708 0</pose></include>
+  <include><uri>model://pierre_camelot</uri><name>pierre_bord_sud_4_3</name><pose>2.250 0.057 0.2773 0 1.5708 0</pose></include>
+  <include><uri>model://pierre_camelot</uri><name>pierre_bord_nord_1_1</name><pose>0.750 1.943 0.0551 0 1.5708 0</pose></include>
+  <include><uri>model://pierre_camelot</uri><name>pierre_bord_nord_1_2</name><pose>0.750 1.943 0.1662 0 1.5708 0</pose></include>
+  <include><uri>model://pierre_camelot</uri><name>pierre_bord_nord_1_3</name><pose>0.750 1.943 0.2773 0 1.5708 0</pose></include>
+  <include><uri>model://pierre_camelot</uri><name>pierre_bord_nord_2_1</name><pose>1.250 1.943 0.0551 0 1.5708 0</pose></include>
+  <include><uri>model://pierre_camelot</uri><name>pierre_bord_nord_2_2</name><pose>1.250 1.943 0.1662 0 1.5708 0</pose></include>
+  <include><uri>model://pierre_camelot</uri><name>pierre_bord_nord_2_3</name><pose>1.250 1.943 0.2773 0 1.5708 0</pose></include>
+  <include><uri>model://pierre_camelot</uri><name>pierre_bord_nord_3_1</name><pose>1.750 1.943 0.0551 0 1.5708 0</pose></include>
+  <include><uri>model://pierre_camelot</uri><name>pierre_bord_nord_3_2</name><pose>1.750 1.943 0.1662 0 1.5708 0</pose></include>
+  <include><uri>model://pierre_camelot</uri><name>pierre_bord_nord_3_3</name><pose>1.750 1.943 0.2773 0 1.5708 0</pose></include>
+  <include><uri>model://pierre_camelot</uri><name>pierre_bord_nord_4_1</name><pose>2.250 1.943 0.0551 0 1.5708 0</pose></include>
+  <include><uri>model://pierre_camelot</uri><name>pierre_bord_nord_4_2</name><pose>2.250 1.943 0.1662 0 1.5708 0</pose></include>
+  <include><uri>model://pierre_camelot</uri><name>pierre_bord_nord_4_3</name><pose>2.250 1.943 0.2773 0 1.5708 0</pose></include>
 
   <include><uri>model://humain</uri><name>humain_1</name><pose>0.7 -0.45 -1.0 0 0 1.066</pose></include>
   <include><uri>model://humain</uri><name>humain_2</name><pose>2.2 -0.5 -1.0 0 0 2.007</pose></include>
@@ -59,6 +93,7 @@
   <include><uri>model://humain</uri><name>humain_7</name><pose>3.55 0.4 -1.0 0 0 2.857</pose></include>
   <include><uri>model://humain</uri><name>humain_8</name><pose>3.5 1.7 -1.0 0 0 -2.805</pose></include>
 
+  <!-- Robot au centre de la salle du trône jaune (zone de départ 50 x 50 cm), face au centre de la table -->
   <model name="robot_omni"><pose>0.5 1 0 0 0 0</pose>
 
 
