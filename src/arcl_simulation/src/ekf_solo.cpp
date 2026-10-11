@@ -69,7 +69,7 @@ class EKFSolo : public rclcpp::Node{
                             a, -a, -a, a,
                             b, b, b, b;
 
-                        state_estimation << 0.5, 1.0, 0.0;
+                        state_estimation << 0.25, 1.0, 0.0;
 
                         // P0 : 2 cm et 3° de placement à la main
                         state_covariance_estimation = Eigen::Matrix3d::Zero();
