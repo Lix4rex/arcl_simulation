@@ -2,7 +2,7 @@
 <!--
   Table Eurobot 3 m x 2 m avec ses bordures, 3 balises fixes cylindriques hors de la table,
   et un robot holonome à 4 roues omni aux coins, tournées de 45° (configuration en X).
-  Le robot porte un lidar sur mât et une caméra frontale sur un petit socle.
+  Le robot porte un lidar sur mât et une caméra frontale posée au ras du châssis.
   Pierres de la Coupe de France / Eurobot 2027 (La légende de Camelot) avec ArUco 13 : modèle pierre_camelot (dossier models/).
   Repère monde : origine dans un coin intérieur de l'arène, X le long des 3 m, Y le long des 2 m, Z vers le haut.
   Écrit pour Gazebo Harmonic (gz sim) / ROS 2 Jazzy. Lancer : gz sim arene_omni.sdf
@@ -48,7 +48,7 @@
 
 
   <!-- Pierre Eurobot 2027 (carton 320 x 110 x 110 mm, ArUco 13), debout devant le robot -->
-  <include><uri>model://pierre_camelot</uri><name>pierre</name><pose>0.9 1 0.16 1.57 0 0</pose></include>
+  <include><uri>model://pierre_camelot</uri><name>pierre</name><pose>1.0 1.1 0.16 -1.57 0 0</pose></include>
 
   <include><uri>model://humain</uri><name>humain_1</name><pose>0.7 -0.45 -1.0 0 0 1.066</pose></include>
   <include><uri>model://humain</uri><name>humain_2</name><pose>2.2 -0.5 -1.0 0 0 2.007</pose></include>
@@ -71,15 +71,16 @@
       <sensor name="lidar" type="gpu_lidar"><pose>0 0 0.385 0 0 0</pose><topic>scan</topic><gz_frame_id>lidar</gz_frame_id><update_rate>10</update_rate><always_on>true</always_on><visualize>true</visualize><lidar><scan><horizontal><samples>720</samples><resolution>1</resolution><min_angle>-3.14159</min_angle><max_angle>3.14159</max_angle></horizontal><vertical><samples>1</samples><resolution>1</resolution><min_angle>0</min_angle><max_angle>0</max_angle></vertical></scan><range><min>0.08</min><max>8.0</max><resolution>0.01</resolution></range><noise><type>gaussian</type><mean>0</mean><stddev>0.01</stddev></noise></lidar></sensor>
       <sensor name="imu" type="imu"><topic>imu</topic><gz_frame_id>imu</gz_frame_id><update_rate>200</update_rate><always_on>true</always_on><imu><linear_acceleration><x><noise type="gaussian"><mean>0</mean><stddev>0.02</stddev><bias_mean>0.05</bias_mean><bias_stddev>0.01</bias_stddev></noise></x><y><noise type="gaussian"><mean>0</mean><stddev>0.02</stddev><bias_mean>0.05</bias_mean><bias_stddev>0.01</bias_stddev></noise></y><z><noise type="gaussian"><mean>0</mean><stddev>0.02</stddev><bias_mean>0.05</bias_mean><bias_stddev>0.01</bias_stddev></noise></z></linear_acceleration></imu></sensor>
 
-      <!-- Socle caméra : petite plaque verticale à l'avant (x = 0.07 -> 0.10, sommet à 17 cm du sol) -->
-      <collision name="socle_cam_c"><pose>0.085 0 0.085 0 0 0</pose><geometry><box><size>0.03 0.06 0.12</size></box></geometry></collision>
-      <visual name="socle_cam_v"><pose>0.085 0 0.085 0 0 0</pose><geometry><box><size>0.03 0.06 0.12</size></box></geometry><material><ambient>0.3 0.3 0.3 1</ambient><diffuse>0.3 0.3 0.3 1</diffuse><specular>0.1 0.1 0.1 1</specular></material></visual>
+      <!-- Support caméra : simple plaque de 3 mm vissée sur le dessus du châssis, à l'avant -->
+      <visual name="support_cam_v"><pose>0.09 0 0.0265 0 0 0</pose><geometry><box><size>0.02 0.05 0.003</size></box></geometry><material><ambient>0.3 0.3 0.3 1</ambient><diffuse>0.3 0.3 0.3 1</diffuse><specular>0.1 0.1 0.1 1</specular></material></visual>
 
-      <!-- Boîtier caméra posé sur le socle -->
-      <visual name="cam_boitier"><pose>0.09 0 0.1575 0 0 0</pose><geometry><box><size>0.02 0.05 0.025</size></box></geometry><material><ambient>0.1 0.1 0.1 1</ambient><diffuse>0.1 0.1 0.1 1</diffuse><specular>0.2 0.2 0.2 1</specular></material></visual>
-      <visual name="cam_objectif"><pose>0.105 0 0.1575 0 1.5708 0</pose><geometry><cylinder><radius>0.008</radius><length>0.01</length></cylinder></geometry><material><ambient>0.05 0.05 0.2 1</ambient><diffuse>0.05 0.05 0.2 1</diffuse><specular>0.5 0.5 0.5 1</specular></material></visual>
+      <!-- Boîtier caméra posé sur le support : centre optique à 8.55 cm du sol (dessus des roues à 6 cm) -->
+      <visual name="cam_boitier"><pose>0.09 0 0.0405 0 0 0</pose><geometry><box><size>0.02 0.05 0.025</size></box></geometry><material><ambient>0.1 0.1 0.1 1</ambient><diffuse>0.1 0.1 0.1 1</diffuse><specular>0.2 0.2 0.2 1</specular></material></visual>
+      <visual name="cam_objectif"><pose>0.105 0 0.0405 0 1.5708 0</pose><geometry><cylinder><radius>0.008</radius><length>0.01</length></cylinder></geometry><material><ambient>0.05 0.05 0.2 1</ambient><diffuse>0.05 0.05 0.2 1</diffuse><specular>0.5 0.5 0.5 1</specular></material></visual>
+      <collision name="cam_c"><pose>0.09 0 0.039 0 0 0</pose><geometry><box><size>0.02 0.05 0.028</size></box></geometry></collision>
 
-      <sensor name="camera" type="camera"><pose>0.11 0 0.1575 0 0.2 0</pose><topic>camera/image</topic><gz_frame_id>camera_optical</gz_frame_id><update_rate>30</update_rate><always_on>true</always_on><visualize>true</visualize>
+      <!-- Capteur caméra, axe optique horizontal -->
+      <sensor name="camera" type="camera"><pose>0.11 0 0.0405 0 0 0</pose><topic>camera/image</topic><gz_frame_id>camera_optical</gz_frame_id><update_rate>30</update_rate><always_on>true</always_on><visualize>true</visualize>
         <camera><horizontal_fov>1.047</horizontal_fov><image><width>640</width><height>480</height><format>R8G8B8</format></image><clip><near>0.02</near><far>10</far></clip><noise><type>gaussian</type><mean>0</mean><stddev>0.007</stddev></noise></camera>
       </sensor>
     </link>

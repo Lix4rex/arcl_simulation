@@ -6,6 +6,7 @@ Panels:
       Expanded:
         - /Global Options1
         - /Pose vraie1/Shape1
+        - /PoseArray1
       Splitter Ratio: 0.5
     Tree Height: 230
   - Class: rviz_common/Views
@@ -352,6 +353,27 @@ Visualization Manager:
         Reliability Policy: Reliable
         Value: /camera/image
       Value: true
+    - Alpha: 1
+      Arrow Length: 0.15000000596046448
+      Axes Length: 0.30000001192092896
+      Axes Radius: 0.009999999776482582
+      Class: rviz_default_plugins/PoseArray
+      Color: 0; 0; 255
+      Enabled: true
+      Head Length: 0.07000000029802322
+      Head Radius: 0.029999999329447746
+      Name: PoseArray
+      Shaft Length: 0.23000000417232513
+      Shaft Radius: 0.009999999776482582
+      Shape: Arrow (3D)
+      Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        Filter size: 10
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /aruco_poses
+      Value: true
   Enabled: true
   Global Options:
     Background Color: 48; 48; 48
@@ -377,25 +399,25 @@ Visualization Manager:
   Views:
     Current:
       Class: rviz_default_plugins/Orbit
-      Distance: 4.070737361907959
+      Distance: 2.027165651321411
       Enable Stereo Rendering:
         Stereo Eye Separation: 0.05999999865889549
         Stereo Focal Distance: 1
         Swap Stereo Eyes: false
         Value: false
       Focal Point:
-        X: 1.4043587446212769
-        Y: 1.2318634986877441
-        Z: 0.06281274557113647
+        X: 1.29910409450531
+        Y: 0.8296632766723633
+        Z: -0.12890398502349854
       Focal Shape Fixed Size: true
       Focal Shape Size: 0.05000000074505806
       Invert Z Axis: false
       Name: Current View
       Near Clip Distance: 0.009999999776482582
-      Pitch: 1.1147964000701904
+      Pitch: 1.279796838760376
       Target Frame: <Fixed Frame>
       Value: Orbit (rviz_default_plugins)
-      Yaw: 4.730010986328125
+      Yaw: 3.795001268386841
     Saved: ~
 Window Geometry:
   Displays:
@@ -410,4 +432,4 @@ Window Geometry:
     collapsed: false
   Width: 1430
   X: 490
-  Y: 44
+  Y: 32

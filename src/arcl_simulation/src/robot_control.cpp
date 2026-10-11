@@ -4,6 +4,7 @@
 #include "geometry_msgs/msg/pose_stamped.hpp"
 #include "sensor_msgs/msg/laser_scan.hpp"
 #include "robot_msgs/msg/obstacle_array.hpp"
+#include "robot_msgs/msg/robot_speed.hpp"
 #include "nav_msgs/msg/path.hpp"
 #include "visualization_msgs/msg/marker.hpp"
 
@@ -62,6 +63,11 @@ class RobotControl : public rclcpp::Node{
                         goal_sub_ = this->create_subscription<geometry_msgs::msg::PoseStamped>(
                                 "/goal_pose", 10,
                                 std::bind(&RobotControl::goal_callback, this, std::placeholders::_1)
+                        );
+
+                        robot_speed_sub_ = this->create_subscription<robot_msgs::msg::RobotSpeed>(
+                                "/speed_command", 10,
+                                std::bind(&RobotControl::robot_speed_callback, this, std::placeholders::_1)
                         );
 
                         obstacles_sub_ = this->create_subscription<robot_msgs::msg::ObstacleArray>(
@@ -456,13 +462,21 @@ class RobotControl : public rclcpp::Node{
 
                         float vx_robot =  cos(theta)*vx_table + sin(theta)*vy_table;
                         float vy_robot = -sin(theta)*vx_table + cos(theta)*vy_table;
+                        send_relative_robot_speed(vx_robot, vy_robot, omega);
+                }
 
+                rclcpp::Subscription<robot_msgs::msg::RobotSpeed>::SharedPtr robot_speed_sub_;
+                void robot_speed_callback(const robot_msgs::msg::RobotSpeed::SharedPtr robot_speed){
+                        send_relative_robot_speed(robot_speed->vx, robot_speed->vy, robot_speed->omega);
+                }
+                
+                void send_relative_robot_speed(float vx_robot, float vy_robot, float omega_robot){
                         float a = sqrt(2)/2;
                         float L = wheel_distance_from_center;
-                        float v1 = -a*vx_robot + a*vy_robot + L*omega;
-                        float v2 = -a*vx_robot - a*vy_robot + L*omega;
-                        float v3 =  a*vx_robot - a*vy_robot + L*omega;
-                        float v4 =  a*vx_robot + a*vy_robot + L*omega;
+                        float v1 = -a*vx_robot + a*vy_robot + L*omega_robot;
+                        float v2 = -a*vx_robot - a*vy_robot + L*omega_robot;
+                        float v3 =  a*vx_robot - a*vy_robot + L*omega_robot;
+                        float v4 =  a*vx_robot + a*vy_robot + L*omega_robot;
 
                         send_wheel_speeds(v1/wheel_radius, v2/wheel_radius, v3/wheel_radius, v4/wheel_radius);
 

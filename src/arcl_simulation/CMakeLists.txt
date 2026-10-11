@@ -15,6 +15,8 @@ find_package(visualization_msgs)
 find_package(Eigen3 REQUIRED)
 find_package(geometry_msgs REQUIRED)
 find_package(nav_msgs REQUIRED)
+find_package(std_srvs REQUIRED)
+find_package(ros2_aruco_interfaces REQUIRED)
 
 
 add_executable(robot_control src/robot_control.cpp)
@@ -25,10 +27,14 @@ add_executable(ekf_solo src/ekf_solo.cpp)
 target_include_directories(ekf_solo PRIVATE ${EIGEN3_INCLUDE_DIR})
 ament_target_dependencies(ekf_solo rclcpp sensor_msgs geometry_msgs visualization_msgs robot_msgs) 
 
+add_executable(rock_centering src/rock_centering.cpp)
+ament_target_dependencies(rock_centering rclcpp std_srvs ros2_aruco_interfaces robot_msgs)
+
 add_executable(table_markers src/table_markers.cpp)
 ament_target_dependencies(table_markers rclcpp visualization_msgs)
 
-install(TARGETS robot_control ekf_solo table_markers
+
+install(TARGETS robot_control ekf_solo rock_centering table_markers
   DESTINATION lib/${PROJECT_NAME})
 
 install(DIRECTORY config launch rviz urdf worlds models

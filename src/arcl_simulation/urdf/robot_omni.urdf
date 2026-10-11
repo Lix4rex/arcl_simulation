@@ -15,11 +15,12 @@
     <visual><geometry><box size="0.2 0.2 0.05"/></geometry><material name="gris"/></visual>
     <visual><origin xyz="0.04 0 0.028"/><geometry><box size="0.04 0.02 0.006"/></geometry><material name="rouge"/></visual>
     <visual><origin xyz="0 0 0.205"/><geometry><cylinder radius="0.01" length="0.36"/></geometry><material name="gris"/></visual>
-    <visual><origin xyz="0.085 0 0.085"/><geometry><box size="0.03 0.06 0.12"/></geometry><material name="anthracite"/></visual>
-    <visual><origin xyz="0.09 0 0.1575"/><geometry><box size="0.02 0.05 0.025"/></geometry><material name="noir"/></visual>
-    <visual><origin xyz="0.105 0 0.1575" rpy="0 1.5708 0"/><geometry><cylinder radius="0.008" length="0.01"/></geometry><material name="bleu_objectif"/></visual>
+    <!-- Support caméra (plaque 3 mm) et boîtier posé dessus, au ras du châssis -->
+    <visual><origin xyz="0.09 0 0.0265"/><geometry><box size="0.02 0.05 0.003"/></geometry><material name="anthracite"/></visual>
+    <visual><origin xyz="0.09 0 0.0405"/><geometry><box size="0.02 0.05 0.025"/></geometry><material name="noir"/></visual>
+    <visual><origin xyz="0.105 0 0.0405" rpy="0 1.5708 0"/><geometry><cylinder radius="0.008" length="0.01"/></geometry><material name="bleu_objectif"/></visual>
     <collision><geometry><box size="0.2 0.2 0.05"/></geometry></collision>
-    <collision><origin xyz="0.085 0 0.085"/><geometry><box size="0.03 0.06 0.12"/></geometry></collision>
+    <collision><origin xyz="0.09 0 0.039"/><geometry><box size="0.02 0.05 0.028"/></geometry></collision>
     <inertial><mass value="3"/><inertia ixx="0.010625" ixy="0" ixz="0" iyy="0.010625" iyz="0" izz="0.02"/></inertial>
   </link>
   <joint name="chassis_joint" type="fixed"><parent link="base_link"/><child link="chassis"/><origin xyz="0 0 0.045"/></joint>
@@ -43,7 +44,7 @@
   <joint name="imu_joint" type="fixed"><parent link="base_link"/><child link="imu"/><origin xyz="0 0 0.045"/></joint>
 
   <link name="camera"/>
-  <joint name="camera_joint" type="fixed"><parent link="base_link"/><child link="camera"/><origin xyz="0.11 0 0.2025" rpy="0 0.2 0"/></joint>
+  <joint name="camera_joint" type="fixed"><parent link="base_link"/><child link="camera"/><origin xyz="0.11 0 0.0855" rpy="0 0 0"/></joint>
 
   <link name="camera_optical"/>
   <joint name="camera_optical_joint" type="fixed"><parent link="camera"/><child link="camera_optical"/><origin xyz="0 0 0" rpy="-1.5708 0 -1.5708"/></joint>

@@ -55,14 +55,35 @@ def generate_launch_description():
         executable="ekf_solo"
     )
 
+    rock_centering = Node(
+        package=pkg_name,
+        executable="rock_centering"
+    )
+
     table_markers = Node(
         package=pkg_name,
         executable="table_markers"
+    )
+
+    
+
+    aruco_params = os.path.join(
+        get_package_share_directory('ros2_aruco'),
+        'config',
+        'aruco_parameters.yaml'
+        )
+
+    aruco_node = Node(
+        package='ros2_aruco',
+        executable='aruco_node',
+        parameters=[aruco_params]
     )
 
     return LaunchDescription([
         DeclareLaunchArgument('rviz', default_value='true'),
         AppendEnvironmentVariable('GZ_SIM_RESOURCE_PATH', os.path.join(pkg, 'worlds')),
         AppendEnvironmentVariable('GZ_SIM_RESOURCE_PATH',os.path.join(pkg, 'models')),
-        gz, bridge, rsp, rviz, robot_control, ekf_solo, table_markers
+        gz, bridge, rsp, rviz, 
+        robot_control, ekf_solo, rock_centering, table_markers,
+        aruco_node
     ])

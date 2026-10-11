@@ -16,6 +16,7 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/Obstacle.msg"
   "msg/ObstacleArray.msg"
   "msg/WheelCommands.msg"
+  "msg/RobotSpeed.msg"
   DEPENDENCIES std_msgs
  )
 
