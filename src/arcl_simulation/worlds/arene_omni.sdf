@@ -9,7 +9,7 @@
 -->
 <sdf version="1.9">
 <world name="arene_omni">
-  <physics name="1ms" type="ignored"><max_step_size>0.001</max_step_size><real_time_factor>1.0</real_time_factor></physics>
+  <physics name="1ms" type="ignored"><max_step_size>0.002</max_step_size><real_time_factor>1.0</real_time_factor></physics>
   <plugin filename="gz-sim-physics-system" name="gz::sim::systems::Physics"/>
   <plugin filename="gz-sim-user-commands-system" name="gz::sim::systems::UserCommands"/>
   <plugin filename="gz-sim-scene-broadcaster-system" name="gz::sim::systems::SceneBroadcaster"/>
@@ -83,15 +83,6 @@
   <include><uri>model://pierre_camelot</uri><name>pierre_bord_nord_4_1</name><pose>2.250 1.943 0.0551 0 1.5708 0</pose></include>
   <include><uri>model://pierre_camelot</uri><name>pierre_bord_nord_4_2</name><pose>2.250 1.943 0.1662 0 1.5708 0</pose></include>
   <include><uri>model://pierre_camelot</uri><name>pierre_bord_nord_4_3</name><pose>2.250 1.943 0.2773 0 1.5708 0</pose></include>
-
-  <include><uri>model://humain</uri><name>humain_1</name><pose>0.7 -0.45 -1.0 0 0 1.066</pose></include>
-  <include><uri>model://humain</uri><name>humain_2</name><pose>2.2 -0.5 -1.0 0 0 2.007</pose></include>
-  <include><uri>model://humain</uri><name>humain_3</name><pose>1.1 2.5 -1.0 0 0 -1.310</pose></include>
-  <include><uri>model://humain</uri><name>humain_4</name><pose>2.6 2.45 -1.0 0 0 -2.219</pose></include>
-  <include><uri>model://humain</uri><name>humain_5</name><pose>-0.55 0.9 -1.0 0 0 0.049</pose></include>
-  <include><uri>model://humain</uri><name>humain_6</name><pose>-0.6 1.6 -1.0 0 0 -0.278</pose></include>
-  <include><uri>model://humain</uri><name>humain_7</name><pose>3.55 0.4 -1.0 0 0 2.857</pose></include>
-  <include><uri>model://humain</uri><name>humain_8</name><pose>3.5 1.7 -1.0 0 0 -2.805</pose></include>
 
   <!-- Robot au centre de la salle du trône jaune (zone de départ 50 x 50 cm), face au centre de la table -->
   <model name="robot_omni"><pose>0.5 1 0 0 0 0</pose>
