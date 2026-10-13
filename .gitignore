@@ -4,6 +4,3 @@ log/*
 site/*
 core
 .vscode
-/.devcontainer/devcontainer.json
-/.devcontainer/Dockerfile
-__pycache__/
