@@ -170,9 +170,14 @@ You need to remove or comment out the wayland options
 
 ### WSL2
 
+#### I can't run `./build.sh`
+This is likely a perf issue related to WSL itself. Try adding `--parallel-workers 1` at the end of the `colcon` command in the script.
+
 #### The gui doesn't show up
 
 This is likely because the DISPLAY environment variable is not getting set properly.
+
+Open WSL Settings and look for the WSLg parameter. Check it is enabled. If gui still doesn't show up, try the folowwing:
 
 1. Find out what your DISPLAY variable should be
 
