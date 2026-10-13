@@ -33,6 +33,8 @@ RUN apt-get update \
     ros-jazzy-gz-ros2-control \
     ros-jazzy-ros2-control \
     ros-jazzy-ros2-controllers \
+    ros-jazzy-tf-transformations \
+    python3-transforms3d \
    && apt-get autoremove -y \
    && apt-get clean -y \
    && rm -rf /var/lib/apt/lists/*
