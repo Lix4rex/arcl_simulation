@@ -1,3 +1,4 @@
+
 {
     "dockerFile": "Dockerfile",
 
@@ -14,20 +15,17 @@
         "--security-opt=seccomp:unconfined",
         "--security-opt=apparmor:unconfined",
         "--ipc=host",
+        "--device=/dev/dri:/dev/dri",
         "--group-add=105",
-        "--gpus=all",
-        "--device=/dev/dri",
-        "--volume=/tmp/.X11-unix:/tmp/.X11-unix:rw"
+        "--volume=/tmp/.X11-unix:/tmp/.X11-unix:rw",
+        "--volume=${localEnv:XAUTHORITY}:/tmp/.docker.xauth:ro"
     ],
 
     "containerEnv": {
         "DISPLAY": "${localEnv:DISPLAY}",
-        "XAUTHORITY": "${localEnv:XAUTHORITY}",
-        "XDG_RUNTIME_DIR": "/run/user/1000",
-        "NVIDIA_VISIBLE_DEVICES": "all",
-        "NVIDIA_DRIVER_CAPABILITIES": "all",
-        "__NV_PRIME_RENDER_OFFLOAD": "1",
-        "__GLX_VENDOR_LIBRARY_NAME": "nvidia"
+        "XAUTHORITY": "/tmp/.docker.xauth",
+        "QT_X11_NO_MITSHM": "1",
+        "LIBGL_ALWAYS_SOFTWARE": "0"
     },
 
     "remoteUser": "ros",

@@ -1,0 +1,50 @@
+{
+    "dockerFile": "Dockerfile",
+    "build": {
+        "args": {
+            "WORKSPACE": "${containerWorkspaceFolder}"
+        },
+        "options": [
+            "--pull"
+        ]
+    },
+    "runArgs": [
+        "--network=host",
+        "--cap-add=SYS_PTRACE",
+        "--security-opt=seccomp:unconfined",
+        "--security-opt=apparmor:unconfined",
+        "--ipc=host",
+        "--volume=/tmp/.X11-unix:/tmp/.X11-unix:rw",
+        "--volume=${localEnv:XAUTHORITY}:/tmp/.docker.xauth:ro",
+        "--gpus=all"
+    ],
+    "containerEnv": {
+        "DISPLAY": "${localEnv:DISPLAY}",
+        "XAUTHORITY": "/tmp/.docker.xauth",
+        "QT_X11_NO_MITSHM": "1",
+        "LIBGL_ALWAYS_SOFTWARE": "0",
+        "NVIDIA_VISIBLE_DEVICES": "all",
+        "NVIDIA_DRIVER_CAPABILITIES": "graphics,utility,compute",
+        "__GLX_VENDOR_LIBRARY_NAME": "nvidia"
+    },
+    "remoteUser": "ros",
+    "customizations": {
+        "vscode": {
+            "extensions": [
+                "althack.ament-task-provider",
+                "betwo.b2-catkin-tools",
+                "DotJoshJohnson.xml",
+                "ms-azuretools.vscode-docker",
+                "ms-python.autopep8",
+                "ms-python.python",
+                "ms-vscode.cpptools",
+                "Ranch-Hand-Robotics.rde-pack",
+                "redhat.vscode-yaml",
+                "streetsidesoftware.code-spell-checker",
+                "twxs.cmake",
+                "yzhang.markdown-all-in-one",
+                "zachflower.uncrustify"
+            ]
+        }
+    }
+}
