@@ -3,7 +3,10 @@ install/*
 log/*
 site/*
 core
+
 .vscode
 /.devcontainer/devcontainer.json
 /.devcontainer/Dockerfile
+/.devcontainer/select_gpu.py
+
 __pycache__/
