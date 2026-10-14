@@ -30,7 +30,7 @@ ros2 topic pub /speed_command robot_msgs/msg/RobotSpeed "{vx: 0.1, vy: 0.0, omeg
 **Se centrer sur une pierre** (tag ArUco visible par la caméra) :
 
 ```bash
-ros2 service call /rock_centering std_srvs/srv/Trigger
+ros2 action send_goal /rock_centering robot_msgs/action/RockCentering "{}" --feedback
 ```
 
 **Attraper / lâcher avec les ventouses** :
