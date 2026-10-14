@@ -11,13 +11,15 @@ find_package(ament_cmake REQUIRED)
 find_package(rosidl_default_generators REQUIRED)
 
 find_package(std_msgs REQUIRED)
+find_package(action_msgs REQUIRED)
 
 rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/Obstacle.msg"
   "msg/ObstacleArray.msg"
   "msg/WheelCommands.msg"
   "msg/RobotSpeed.msg"
-  DEPENDENCIES std_msgs
+  "action/RockCentering.action"
+  DEPENDENCIES std_msgs action_msgs
  )
 
 if(BUILD_TESTING)

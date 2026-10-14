@@ -1,40 +1,45 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <functional>
 #include <memory>
 #include <string>
 
 #include "geometry_msgs/msg/pose.hpp"
 #include "rclcpp/rclcpp.hpp"
+#include "rclcpp_action/rclcpp_action.hpp"
+#include "robot_msgs/action/rock_centering.hpp"
 #include "robot_msgs/msg/robot_speed.hpp"
 #include "ros2_aruco_interfaces/msg/aruco_markers.hpp"
-#include "std_srvs/srv/trigger.hpp"
 
 using namespace std::chrono_literals;
-using ArucoMarkers = ros2_aruco_interfaces::msg::ArucoMarkers;
-using RobotSpeed = robot_msgs::msg::RobotSpeed;
-using Trigger = std_srvs::srv::Trigger;
 
 class RockCentering : public rclcpp::Node {
     public:
         RockCentering() : Node("rock_centering") {
-            aruco_markers_sub_ = create_subscription<ArucoMarkers>(
+            using std::placeholders::_1;
+            using std::placeholders::_2;
+
+            aruco_markers_sub_ = create_subscription<ros2_aruco_interfaces::msg::ArucoMarkers>(
                 "/aruco_markers", 10,
-                std::bind(&RockCentering::aruco_markers_callback, this, std::placeholders::_1));
+                std::bind(&RockCentering::aruco_markers_callback, this, _1)
+            );
 
-            // Service à réponse différée : on répond seulement quand le centrage est fini.
-            centering_srv_ = create_service<Trigger>(
-                "/rock_centering",
-                [this](std::shared_ptr<rmw_request_id_t> header, std::shared_ptr<Trigger::Request> request) {
-                    centering_callback(header, request);
-                });
+            action_server_ = rclcpp_action::create_server<robot_msgs::action::RockCentering>(
+                this, "/rock_centering",
+                std::bind(&RockCentering::handle_goal, this, _1, _2),
+                std::bind(&RockCentering::handle_cancel, this, _1),
+                std::bind(&RockCentering::handle_accepted, this, _1)
+            );
 
-            robot_speed_pub_ = create_publisher<RobotSpeed>("/speed_command", 10);
+            robot_speed_pub_ = create_publisher<robot_msgs::msg::RobotSpeed>("/speed_command", 10);
 
             RCLCPP_INFO(get_logger(), "RockCentering launched successfully");
         }
 
     private:
+        enum class Outcome { Succeeded, Aborted, Canceled };
+
         // Réglages
         int marker_id_ = 13;
         double x_ref_ = 0.0;
@@ -49,10 +54,11 @@ class RockCentering : public rclcpp::Node {
         double tol_pos_ = 0.01;
         double tol_theta_ = 0.08;
 
-        int stable_ticks_needed_ = 10;     // ticks consécutifs dans la tolérance
-        double marker_timeout_ = 0.5;      // s sans tag -> le robot s'arrête
+        int stable_ticks_needed_ = 10;
+        double marker_timeout_ = 0.5;
 
-        double centering_timeout_ = 15.0;  // s
+        double centering_timeout_ = 15.0;
+        int feedback_every_ticks_ = 5;
 
         // Dernière détection du tag
         bool has_pose_ = false;
@@ -60,17 +66,18 @@ class RockCentering : public rclcpp::Node {
         rclcpp::Time last_seen_;
 
         // État du centrage
-        bool centering_active_ = false;
+        std::shared_ptr<rclcpp_action::ServerGoalHandle<robot_msgs::action::RockCentering>> active_goal_;
         int stable_ticks_ = 0;
+        int tick_count_ = 0;
         rclcpp::Time start_time_;
-        std::shared_ptr<rmw_request_id_t> pending_request_header_;
 
-        rclcpp::Subscription<ArucoMarkers>::SharedPtr aruco_markers_sub_;
-        rclcpp::Service<Trigger>::SharedPtr centering_srv_;
-        rclcpp::Publisher<RobotSpeed>::SharedPtr robot_speed_pub_;
+        rclcpp::Subscription<ros2_aruco_interfaces::msg::ArucoMarkers>::SharedPtr aruco_markers_sub_;
+        rclcpp_action::Server<robot_msgs::action::RockCentering>::SharedPtr action_server_;
+        rclcpp::Publisher<robot_msgs::msg::RobotSpeed>::SharedPtr robot_speed_pub_;
         rclcpp::TimerBase::SharedPtr aruco_centering_timer_;
 
-        void aruco_markers_callback(const ArucoMarkers::SharedPtr msg) {
+
+        void aruco_markers_callback(const ros2_aruco_interfaces::msg::ArucoMarkers::SharedPtr msg) {
             bool found = false;
             double best_z = 1e9;
             for (size_t i = 0; i < msg->marker_ids.size() && i < msg->poses.size(); ++i) {
@@ -88,32 +95,55 @@ class RockCentering : public rclcpp::Node {
             }
         }
 
-        void centering_callback(std::shared_ptr<rmw_request_id_t> header, std::shared_ptr<Trigger::Request> /*request*/) {
-            if (centering_active_) {
-                Trigger::Response response;
-                response.success = false;
-                response.message = "Centering already in progress";
-                centering_srv_->send_response(*header, response);
-                return;
+        rclcpp_action::GoalResponse handle_goal(const rclcpp_action::GoalUUID & /*uuid*/, std::shared_ptr<const robot_msgs::action::RockCentering::Goal> /*goal*/) {
+            if (active_goal_) {
+                RCLCPP_WARN(get_logger(), "Goal rejected: centering already in progress");
+                return rclcpp_action::GoalResponse::REJECT;
             }
-            centering_active_ = true;
+            RCLCPP_INFO(get_logger(), "Goal received");
+            return rclcpp_action::GoalResponse::ACCEPT_AND_EXECUTE;
+        }
+
+        rclcpp_action::CancelResponse handle_cancel(const std::shared_ptr<rclcpp_action::ServerGoalHandle<robot_msgs::action::RockCentering>> /*goal_handle*/) {
+            RCLCPP_INFO(get_logger(), "Cancel requested");
+            return rclcpp_action::CancelResponse::ACCEPT;
+        }
+
+        void handle_accepted(const std::shared_ptr<rclcpp_action::ServerGoalHandle<robot_msgs::action::RockCentering>> goal_handle) {
+            active_goal_ = goal_handle;
             stable_ticks_ = 0;
+            tick_count_ = 0;
             start_time_ = now();
-            pending_request_header_ = header;
             aruco_centering_timer_ = create_wall_timer(20ms, std::bind(&RockCentering::aruco_centering_loop, this));
-            RCLCPP_INFO(get_logger(), "Centering started");
+            RCLCPP_INFO(get_logger(), "Centering started on marker %d", marker_id_);
         }
 
         void aruco_centering_loop() {
-            if ((now() - start_time_).seconds() > centering_timeout_) {
-                finish_centering(false, "Centering timeout");
+            if (!active_goal_) return;
+
+            if (active_goal_->is_canceling()) {
+                finish_centering(Outcome::Canceled, "Centering canceled");
                 return;
             }
+
+            const double elapsed = (now() - start_time_).seconds();
+            if (elapsed > centering_timeout_) {
+                finish_centering(Outcome::Aborted, "Centering timeout");
+                return;
+            }
+
+            ++tick_count_;
+            auto feedback = std::make_shared<robot_msgs::action::RockCentering::Feedback>();
+            feedback->elapsed = elapsed;
 
             if (!has_pose_ || (now() - last_seen_).seconds() > marker_timeout_) {
                 stable_ticks_ = 0;
                 publish_speed(0.0, 0.0, 0.0);
                 RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 1000, "Marker %d not visible, waiting", marker_id_);
+                if (tick_count_ % feedback_every_ticks_ == 0) {
+                    feedback->marker_visible = false;
+                    active_goal_->publish_feedback(feedback);
+                }
                 return;
             }
 
@@ -132,35 +162,50 @@ class RockCentering : public rclcpp::Node {
             const double vy = std::clamp(kp_ * err_lat, -v_max_, v_max_);
             const double omega = std::clamp(kp_theta_ * err_theta, -omega_max_, omega_max_);
 
+            if (tick_count_ % feedback_every_ticks_ == 0) {
+                feedback->marker_visible = true;
+                feedback->err_fwd = err_fwd;
+                feedback->err_lat = err_lat;
+                feedback->err_theta = err_theta;
+                active_goal_->publish_feedback(feedback);
+            }
+
             const bool ok = std::fabs(err_fwd) < tol_pos_ && std::fabs(err_lat) < tol_pos_ && std::fabs(err_theta) < tol_theta_;
             stable_ticks_ = ok ? stable_ticks_ + 1 : 0;
 
             if (stable_ticks_ >= stable_ticks_needed_) {
-                finish_centering(true, "Centered on ArUco");
+                finish_centering(Outcome::Succeeded, "Centered on ArUco");
                 return;
             }
             publish_speed(vx, vy, omega);
         }
 
         void publish_speed(double vx, double vy, double omega) {
-            RobotSpeed msg;
+            robot_msgs::msg::RobotSpeed msg;
             msg.vx = vx;
             msg.vy = vy;
             msg.omega = omega;
             robot_speed_pub_->publish(msg);
         }
 
-        void finish_centering(bool success, const std::string & message) {
-            if (aruco_centering_timer_) aruco_centering_timer_->cancel();
+        void finish_centering(Outcome outcome, const std::string & message) {
+            if (aruco_centering_timer_) {
+                aruco_centering_timer_->cancel();
+                aruco_centering_timer_.reset();
+            }
             publish_speed(0.0, 0.0, 0.0);
 
-            Trigger::Response response;
-            response.success = success;
-            response.message = message;
-            centering_srv_->send_response(*pending_request_header_, response);
+            auto result = std::make_shared<robot_msgs::action::RockCentering::Result>();
+            result->success = (outcome == Outcome::Succeeded);
+            result->message = message;
 
-            pending_request_header_.reset();
-            centering_active_ = false;
+            switch (outcome) {
+                case Outcome::Succeeded: active_goal_->succeed(result);  break;
+                case Outcome::Aborted:   active_goal_->abort(result);    break;
+                case Outcome::Canceled:  active_goal_->canceled(result); break;
+            }
+
+            active_goal_.reset();
             RCLCPP_INFO(get_logger(), "Centering finished: %s", message.c_str());
         }
 };

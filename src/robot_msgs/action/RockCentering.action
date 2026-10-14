@@ -1,0 +1,12 @@
+# Goal (vide : simple déclenchement)
+---
+# Result
+bool success
+string message
+---
+# Feedback
+bool marker_visible
+float64 err_fwd
+float64 err_lat
+float64 err_theta
+float64 elapsed

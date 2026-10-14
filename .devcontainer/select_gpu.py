@@ -1,4 +1,4 @@
-GPU = "intel"  # "intel" ou "nvidia" ; exécuter sur l'hôte avant d'ouvrir le conteneur.
+GPU = "nvidia"  # "intel" ou "nvidia" ; exécuter sur l'hôte avant d'ouvrir le conteneur.
 
 from pathlib import Path
 import shutil
