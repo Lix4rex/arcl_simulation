@@ -16,4 +16,13 @@ install(TARGETS Ventouse LIBRARY DESTINATION lib)
 # Ajoute install/ventouse_plugin/lib à GZ_SIM_SYSTEM_PLUGIN_PATH quand on source install/setup.bash
 ament_environment_hooks("${CMAKE_CURRENT_SOURCE_DIR}/hooks/${PROJECT_NAME}.dsv.in")
 
+if(BUILD_TESTING)
+  find_package(ament_cmake_gtest REQUIRED)
+  ament_add_gtest(ventouse_integration test/ventouse_integration.cc TIMEOUT 60
+    APPEND_ENV GZ_SIM_SYSTEM_PLUGIN_PATH=$<TARGET_FILE_DIR:Ventouse>)
+  target_compile_features(ventouse_integration PRIVATE cxx_std_17)
+  target_link_libraries(ventouse_integration gz-sim8::gz-sim8)
+  add_dependencies(ventouse_integration Ventouse)
+endif()
+
 ament_package()

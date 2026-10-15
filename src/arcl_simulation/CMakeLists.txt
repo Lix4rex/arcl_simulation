@@ -9,6 +9,7 @@ endif()
 find_package(ament_cmake REQUIRED)
 find_package(rclcpp)
 find_package(std_msgs)
+find_package(std_srvs REQUIRED)
 find_package(robot_msgs)
 find_package(sensor_msgs)
 find_package(visualization_msgs)
@@ -33,8 +34,11 @@ ament_target_dependencies(rock_centering rclcpp ros2_aruco_interfaces robot_msgs
 add_executable(table_markers src/table_markers.cpp)
 ament_target_dependencies(table_markers rclcpp visualization_msgs)
 
+add_executable(ventouse_service src/ventouse_service.cpp)
+target_compile_features(ventouse_service PRIVATE cxx_std_17)
+ament_target_dependencies(ventouse_service rclcpp std_msgs std_srvs)
 
-install(TARGETS robot_control ekf_solo rock_centering table_markers
+install(TARGETS robot_control ekf_solo rock_centering table_markers ventouse_service
   DESTINATION lib/${PROJECT_NAME})
 
 install(DIRECTORY config launch rviz urdf worlds models
@@ -43,6 +47,10 @@ install(DIRECTORY config launch rviz urdf worlds models
 
 
 if(BUILD_TESTING)
+  find_package(ament_cmake_pytest REQUIRED)
+  ament_add_pytest_test(ventouse_service_test test/test_ventouse_service.py
+    TIMEOUT 90
+    ENV VENTOUSE_SERVICE_EXECUTABLE=$<TARGET_FILE:ventouse_service>)
   find_package(ament_lint_auto REQUIRED)
   # the following line skips the linter which checks for copyrights
   # comment the line when a copyright and license is added to all source files

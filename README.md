@@ -36,6 +36,8 @@ ros2 action send_goal /rock_centering robot_msgs/action/RockCentering "{}" --fee
 **Attraper / lâcher avec les ventouses** :
 
 ```bash
-ros2 topic pub --once /robot_omni/ventouse std_msgs/msg/Bool "{data: true}"   # attraper
-ros2 topic pub --once /robot_omni/ventouse std_msgs/msg/Bool "{data: false}"  # lâcher
+ros2 service call /robot_omni/ventouse/set std_srvs/srv/SetBool "{data: true}"   # attraper
+ros2 service call /robot_omni/ventouse/set std_srvs/srv/SetBool "{data: false}"  # lâcher
 ```
+
+Détails techniques : [compilation](doc/compilation.md) et [ventouses](doc/ventouse.md).
