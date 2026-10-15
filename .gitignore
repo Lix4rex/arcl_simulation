@@ -1,12 +1,11 @@
-build/*
-install/*
-log/*
-site/*
+build
+install
+log
+site
 core
 
 .vscode
 /.devcontainer/devcontainer.json
 /.devcontainer/Dockerfile
-/.devcontainer/select_gpu.py
 
-__pycache__/
+__pycache__
