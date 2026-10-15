@@ -178,8 +178,8 @@
     <!-- Ascenseur piloté en position (commandes en vitesse : force non limitée), 10 cm/s max -->
     <plugin filename="gz-sim-joint-position-controller-system" name="gz::sim::systems::JointPositionController"><joint_name>ascenseur_joint</joint_name><topic>/robot_omni/ascenseur/cmd_pos</topic><use_velocity_commands>true</use_velocity_commands><cmd_max>0.1</cmd_max><cmd_min>-0.1</cmd_min></plugin>
     <!-- Ventouses (paquet ventouse_plugin) : colle ce qui touche les bouches puis lève l'ascenseur ; au lâcher, redescend puis relâche.
-         gz topic -t /robot_omni/ventouse -m gz.msgs.Boolean -p 'data: true'   (false pour lâcher) -->
-    <plugin filename="Ventouse" name="ventouse::Ventouse"><link>ascenseur</link><collision>ventouse_g_c</collision><collision>ventouse_d_c</collision><topic>/robot_omni/ventouse</topic><topic_ascenseur>/robot_omni/ascenseur/cmd_pos</topic_ascenseur><hauteur>0.05</hauteur><delai_lacher>0.7</delai_lacher></plugin>
+         ros2 service call /robot_omni/ventouse/set std_srvs/srv/SetBool '{data: true}' (false pour lâcher) -->
+    <plugin filename="Ventouse" name="ventouse::Ventouse"><link>ascenseur</link><collision>ventouse_g_c</collision><collision>ventouse_d_c</collision><topic_commande>/robot_omni/ventouse/commande</topic_commande><topic_resultat>/robot_omni/ventouse/resultat</topic_resultat><topic_etat>/robot_omni/ventouse/etat</topic_etat><topic_ascenseur>/robot_omni/ascenseur/cmd_pos</topic_ascenseur><hauteur>0.05</hauteur><delai_lacher>0.7</delai_lacher></plugin>
   
   </model>
 </world>
