@@ -50,9 +50,31 @@ def generate_launch_description():
         executable="robot_control"
     )
 
-    ekf_solo = Node(
+    # Localisation : odométrie roues + OTOS -> ekf_node (robot_localization) -> recalage balises
+    wheel_odometry = Node(
         package=pkg_name,
-        executable="ekf_solo"
+        executable="wheel_odometry",
+        parameters=[{'use_sim_time': True}]
+    )
+
+    otos_simulator = Node(
+        package=pkg_name,
+        executable="otos_simulator",
+        parameters=[{'use_sim_time': True}]
+    )
+
+    ekf_odom = Node(
+        package='robot_localization',
+        executable='ekf_node',
+        name='ekf_odom',
+        output='screen',
+        parameters=[os.path.join(pkg, 'config', 'ekf_odom.yaml')]
+    )
+
+    beacon_localization = Node(
+        package=pkg_name,
+        executable="beacon_localization",
+        parameters=[{'use_sim_time': True}]
     )
 
     rock_centering = Node(
@@ -84,6 +106,7 @@ def generate_launch_description():
         AppendEnvironmentVariable('GZ_SIM_RESOURCE_PATH', os.path.join(pkg, 'worlds')),
         AppendEnvironmentVariable('GZ_SIM_RESOURCE_PATH',os.path.join(pkg, 'models')),
         gz, bridge, rsp, rviz, 
-        robot_control, ekf_solo, rock_centering, table_markers,
+        robot_control, rock_centering, table_markers,
+        wheel_odometry, otos_simulator, ekf_odom, beacon_localization,
         aruco_node
     ])

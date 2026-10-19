@@ -98,6 +98,8 @@ Visualization Manager:
         All Enabled: true
         base_link:
           Value: true
+        base_link_vrai:
+          Value: true
         camera:
           Value: true
         camera_optical:
@@ -109,6 +111,8 @@ Visualization Manager:
         lidar:
           Value: true
         map:
+          Value: true
+        odom:
           Value: true
         roue_1:
           Value: true
@@ -125,24 +129,27 @@ Visualization Manager:
       Show Names: false
       Tree:
         map:
-          base_link:
-            camera:
-              camera_optical:
+          base_link_vrai:
+            {}
+          odom:
+            base_link:
+              camera:
+                camera_optical:
+                  {}
+              chassis:
                 {}
-            chassis:
-              {}
-            imu:
-              {}
-            lidar:
-              {}
-            roue_1:
-              {}
-            roue_2:
-              {}
-            roue_3:
-              {}
-            roue_4:
-              {}
+              imu:
+                {}
+              lidar:
+                {}
+              roue_1:
+                {}
+              roue_2:
+                {}
+              roue_3:
+                {}
+              roue_4:
+                {}
       Update Interval: 0
       Value: true
     - Alpha: 1
@@ -209,7 +216,7 @@ Visualization Manager:
           Scale: 1
           Value: true
         Value: false
-      Enabled: false
+      Enabled: true
       Keep: 1
       Name: Pose vraie
       Position Tolerance: 0.10000000149011612
@@ -230,7 +237,7 @@ Visualization Manager:
         History Policy: Keep Last
         Reliability Policy: Reliable
         Value: /robot_omni/pose_vraie
-      Value: false
+      Value: true
     - Alpha: 0.5
       Axes Length: 1
       Axes Radius: 0.10000000149011612
@@ -330,7 +337,7 @@ Visualization Manager:
       Enabled: true
       Name: Marker
       Namespaces:
-        obstacles: true
+        {}
       Topic:
         Depth: 5
         Durability Policy: Volatile
@@ -399,25 +406,25 @@ Visualization Manager:
   Views:
     Current:
       Class: rviz_default_plugins/Orbit
-      Distance: 2.027165651321411
+      Distance: 1.418271541595459
       Enable Stereo Rendering:
         Stereo Eye Separation: 0.05999999865889549
         Stereo Focal Distance: 1
         Swap Stereo Eyes: false
         Value: false
       Focal Point:
-        X: 1.29910409450531
-        Y: 0.8296632766723633
-        Z: -0.12890398502349854
+        X: 0.9527239799499512
+        Y: 0.7805355191230774
+        Z: -0.27919119596481323
       Focal Shape Fixed Size: true
       Focal Shape Size: 0.05000000074505806
       Invert Z Axis: false
       Name: Current View
       Near Clip Distance: 0.009999999776482582
-      Pitch: 1.279796838760376
+      Pitch: 1.1647969484329224
       Target Frame: <Fixed Frame>
       Value: Orbit (rviz_default_plugins)
-      Yaw: 3.795001268386841
+      Yaw: 3.3200013637542725
     Saved: ~
 Window Geometry:
   Displays:

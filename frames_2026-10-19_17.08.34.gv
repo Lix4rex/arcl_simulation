@@ -1,0 +1,18 @@
+digraph G {
+"odom" -> "base_link"[label=" Broadcaster: default_authority\nAverage rate: 97.979\nBuffer length: 4.848\nMost recent transform: 11.235\nOldest transform: 6.387\n"];
+"map" -> "odom"[label=" Broadcaster: default_authority\nAverage rate: 97.934\nBuffer length: 4.452\nMost recent transform: 11.235\nOldest transform: 6.783\n"];
+"map" -> "base_link_vrai"[label=" Broadcaster: default_authority\nAverage rate: 83.559\nBuffer length: 4.44\nMost recent transform: 11.232\nOldest transform: 6.792\n"];
+"base_link" -> "roue_1"[label=" Broadcaster: default_authority\nAverage rate: 19.833\nBuffer length: 4.437\nMost recent transform: 11.22\nOldest transform: 6.783\n"];
+"base_link" -> "roue_2"[label=" Broadcaster: default_authority\nAverage rate: 19.833\nBuffer length: 4.437\nMost recent transform: 11.22\nOldest transform: 6.783\n"];
+"base_link" -> "roue_3"[label=" Broadcaster: default_authority\nAverage rate: 19.833\nBuffer length: 4.437\nMost recent transform: 11.22\nOldest transform: 6.783\n"];
+"base_link" -> "roue_4"[label=" Broadcaster: default_authority\nAverage rate: 19.833\nBuffer length: 4.437\nMost recent transform: 11.22\nOldest transform: 6.783\n"];
+"base_link" -> "camera"[label=" Broadcaster: default_authority\nAverage rate: 10000.0\nBuffer length: 0.0\nMost recent transform: 0.0\nOldest transform: 0.0\n"];
+"camera" -> "camera_optical"[label=" Broadcaster: default_authority\nAverage rate: 10000.0\nBuffer length: 0.0\nMost recent transform: 0.0\nOldest transform: 0.0\n"];
+"base_link" -> "chassis"[label=" Broadcaster: default_authority\nAverage rate: 10000.0\nBuffer length: 0.0\nMost recent transform: 0.0\nOldest transform: 0.0\n"];
+"base_link" -> "imu"[label=" Broadcaster: default_authority\nAverage rate: 10000.0\nBuffer length: 0.0\nMost recent transform: 0.0\nOldest transform: 0.0\n"];
+"base_link" -> "lidar"[label=" Broadcaster: default_authority\nAverage rate: 10000.0\nBuffer length: 0.0\nMost recent transform: 0.0\nOldest transform: 0.0\n"];
+edge [style=invis];
+ subgraph cluster_legend { style=bold; color=black; label ="view_frames Result";
+"Recorded at time: 1792429714.1920743"[ shape=plaintext ] ;
+}->"map";
+}

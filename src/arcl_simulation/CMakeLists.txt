@@ -17,15 +17,24 @@ find_package(geometry_msgs REQUIRED)
 find_package(nav_msgs REQUIRED)
 find_package(ros2_aruco_interfaces REQUIRED)
 find_package(rclcpp_action REQUIRED)
+find_package(tf2_ros REQUIRED)
 
 
 add_executable(robot_control src/robot_control.cpp)
 target_include_directories(robot_control PRIVATE ${EIGEN3_INCLUDE_DIR})
 ament_target_dependencies(robot_control rclcpp std_msgs robot_msgs geometry_msgs sensor_msgs nav_msgs visualization_msgs)
 
-add_executable(ekf_solo src/ekf_solo.cpp)
-target_include_directories(ekf_solo PRIVATE ${EIGEN3_INCLUDE_DIR})
-ament_target_dependencies(ekf_solo rclcpp sensor_msgs geometry_msgs visualization_msgs robot_msgs) 
+add_executable(beacon_localization src/beacon_localization.cpp)
+target_include_directories(beacon_localization PRIVATE ${EIGEN3_INCLUDE_DIR})
+ament_target_dependencies(beacon_localization rclcpp sensor_msgs geometry_msgs nav_msgs visualization_msgs robot_msgs tf2_ros)
+
+add_executable(wheel_odometry src/wheel_odometry.cpp)
+target_include_directories(wheel_odometry PRIVATE ${EIGEN3_INCLUDE_DIR})
+ament_target_dependencies(wheel_odometry rclcpp sensor_msgs nav_msgs)
+
+add_executable(otos_simulator src/otos_simulator.cpp)
+target_include_directories(otos_simulator PRIVATE ${EIGEN3_INCLUDE_DIR})
+ament_target_dependencies(otos_simulator rclcpp nav_msgs)
 
 add_executable(rock_centering src/rock_centering.cpp)
 ament_target_dependencies(rock_centering rclcpp ros2_aruco_interfaces robot_msgs rclcpp_action)
@@ -34,7 +43,7 @@ add_executable(table_markers src/table_markers.cpp)
 ament_target_dependencies(table_markers rclcpp visualization_msgs)
 
 
-install(TARGETS robot_control ekf_solo rock_centering table_markers
+install(TARGETS robot_control beacon_localization wheel_odometry otos_simulator rock_centering table_markers
   DESTINATION lib/${PROJECT_NAME})
 
 install(DIRECTORY config launch rviz urdf worlds models

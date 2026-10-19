@@ -1,0 +1,38 @@
+# ekf_node (robot_localization) : fusion odométrie roues + OTOS dans le repère odom.
+# Sortie : /odometry/filtered, utilisée par beacon_localization pour la prédiction.
+# Les deux capteurs sont fusionnés en vitesse (vx, vy, vyaw dans base_link) : chacun dérive en pose,
+# c'est beacon_localization qui fait le recalage absolu sur les balises.
+ekf_odom:
+  ros__parameters:
+    use_sim_time: true
+    frequency: 100.0
+    sensor_timeout: 0.1
+    two_d_mode: true
+    # TF odom -> base_link (map -> odom est publié par beacon_localization ;
+    # la pose vraie de Gazebo est sur map -> base_link_vrai)
+    publish_tf: true
+
+    map_frame: map
+    odom_frame: odom
+    base_link_frame: base_link
+    world_frame: odom
+
+    # ordre : x, y, z, roll, pitch, yaw, vx, vy, vz, vroll, vpitch, vyaw, ax, ay, az
+    odom0: /wheel/odom
+    odom0_config: [false, false, false,
+                   false, false, false,
+                   true,  true,  false,
+                   false, false, true,
+                   false, false, false]
+    odom0_queue_size: 10
+    # roues qui patinent toutes ensemble (robot poussé contre un mur) : la contrainte des 4 roues
+    # ne le détecte pas, on rejette les vitesses incohérentes avec l'OTOS (distance de Mahalanobis)
+    odom0_twist_rejection_threshold: 3.0
+
+    odom1: /otos/odom
+    odom1_config: [false, false, false,
+                   false, false, false,
+                   true,  true,  false,
+                   false, false, true,
+                   false, false, false]
+    odom1_queue_size: 10
