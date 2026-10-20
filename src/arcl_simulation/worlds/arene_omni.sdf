@@ -174,7 +174,7 @@
     <plugin filename="gz-sim-joint-controller-system" name="gz::sim::systems::JointController"><joint_name>roue_3_joint</joint_name><topic>/robot_omni/roue_3/cmd_vel</topic></plugin>
     <plugin filename="gz-sim-joint-controller-system" name="gz::sim::systems::JointController"><joint_name>roue_4_joint</joint_name><topic>/robot_omni/roue_4/cmd_vel</topic></plugin>
     <plugin filename="gz-sim-joint-state-publisher-system" name="gz::sim::systems::JointStatePublisher"><topic>/robot_omni/joint_states</topic></plugin>
-    <plugin filename="gz-sim-odometry-publisher-system" name="gz::sim::systems::OdometryPublisher"><odom_frame>map</odom_frame><robot_base_frame>base_link</robot_base_frame><odom_topic>/robot_omni/pose_vraie</odom_topic><tf_topic>/robot_omni/tf</tf_topic><dimensions>2</dimensions><odom_publish_frequency>50</odom_publish_frequency></plugin>
+    <plugin filename="gz-sim-odometry-publisher-system" name="gz::sim::systems::OdometryPublisher"><odom_frame>map</odom_frame><robot_base_frame>base_link_vrai</robot_base_frame><odom_topic>/robot_omni/pose_vraie</odom_topic><tf_topic>/robot_omni/tf</tf_topic><dimensions>2</dimensions><odom_publish_frequency>100</odom_publish_frequency></plugin>
     <!-- Ascenseur piloté en position (commandes en vitesse : force non limitée), 10 cm/s max -->
     <plugin filename="gz-sim-joint-position-controller-system" name="gz::sim::systems::JointPositionController"><joint_name>ascenseur_joint</joint_name><topic>/robot_omni/ascenseur/cmd_pos</topic><use_velocity_commands>true</use_velocity_commands><cmd_max>0.1</cmd_max><cmd_min>-0.1</cmd_min></plugin>
     <!-- Ventouses (paquet ventouse_plugin) : colle ce qui touche les bouches puis lève l'ascenseur ; au lâcher, redescend puis relâche.

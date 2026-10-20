@@ -41,3 +41,17 @@ ros2 service call /robot_omni/ventouse/set std_srvs/srv/SetBool "{data: false}" 
 ```
 
 Détails techniques : [compilation](doc/compilation.md) et [ventouses](doc/ventouse.md).
+
+## Localisation
+
+```
+/joint_states ──> wheel_odometry ──> /wheel/odom ──┐
+                                                  ├─> ekf_odom (robot_localization) ──> /odometry/filtered ──┐
+pose vraie ─────> otos_simulator ──> /otos/odom ──┘                                                          ├─> beacon_localization ──> /pose_estimation
+/scan (balises) ─────────────────────────────────────────────────────────────────────────────────────────────┘
+```
+
+- `wheel_odometry` : odométrie des 4 roues omni (vitesse + covariance, gonflée en cas de glissement détecté).
+- `otos_simulator` : simule le SparkFun OTOS (erreur d'échelle, bruit, biais gyro, perte de suivi > 2,5 m/s). Paramètres réglables (`linear_scale_error`, `gyro_noise_density`, ...).
+- `ekf_odom` : `ekf_node` de robot_localization, fusionne les vitesses roues + OTOS dans le repère `odom` ([config/ekf_odom.yaml](src/arcl_simulation/config/ekf_odom.yaml)).
+- `beacon_localization` : EKF dans le repère `map`, prédiction avec `/odometry/filtered`, recalage sur les 3 balises vues au lidar.

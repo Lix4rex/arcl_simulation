@@ -1,9 +1,11 @@
 #include "rclcpp/rclcpp.hpp"
-#include "sensor_msgs/msg/joint_state.hpp"
+#include "nav_msgs/msg/odometry.hpp"
 #include "geometry_msgs/msg/pose_stamped.hpp"
 #include "sensor_msgs/msg/laser_scan.hpp"
 #include "visualization_msgs/msg/marker.hpp"
 #include "robot_msgs/msg/obstacle_array.hpp"
+#include "geometry_msgs/msg/transform_stamped.hpp"
+#include "tf2_ros/transform_broadcaster.hpp"
 
 #include <Eigen/Dense>
 #include <vector>
@@ -28,6 +30,11 @@ double wrap(double a)
   return a - M_PI;
 }
 
+double yawFromQuaternion(const geometry_msgs::msg::Quaternion & q)
+{
+  return std::atan2(2.0 * (q.w * q.z + q.x * q.y), 1.0 - 2.0 * (q.y * q.y + q.z * q.z));
+}
+
 double toSec(const builtin_interfaces::msg::Time & t)
 {
   return static_cast<double>(t.sec) + 1e-9 * static_cast<double>(t.nanosec);
@@ -35,14 +42,24 @@ double toSec(const builtin_interfaces::msg::Time & t)
 
 using namespace std::chrono_literals;
 
-class EKFSolo : public rclcpp::Node{
+// Recalage absolu sur les balises (repère map).
+// Prédiction : déplacements issus de /odometry/filtered (ekf_node de robot_localization, fusion roues + OTOS).
+// Correction : balises détectées au lidar (/scan), avec rejeu de l'historique pour compenser le retard du scan.
+// Publie la TF map -> odom (correction de la dérive de l'odométrie).
+
+class BeaconLocalization : public rclcpp::Node{
 
         public:
-                EKFSolo() : Node("ekf_solo"){
+                BeaconLocalization() : Node("beacon_localization"){
 
-                        joint_states_sub_ = create_subscription<sensor_msgs::msg::JointState>(
-                            "/joint_states", 10,
-                            std::bind(&EKFSolo::onJointStates, this, std::placeholders::_1)
+                        // bruit du déplacement odométrique fusionné : variance = k^2 * distance parcourue
+                        k_lineaire = declare_parameter("k_lineaire", 0.01);
+                        k_angulaire = declare_parameter("k_angulaire", 0.01);
+                        k_angulaire_par_metre = declare_parameter("k_angulaire_par_metre", 0.005);
+
+                        odom_sub_ = create_subscription<nav_msgs::msg::Odometry>(
+                            "/odometry/filtered", 10,
+                            std::bind(&BeaconLocalization::onOdometry, this, std::placeholders::_1)
                         );
 
                         estimate_position_pub_ = create_publisher<geometry_msgs::msg::PoseStamped>(
@@ -51,7 +68,7 @@ class EKFSolo : public rclcpp::Node{
 
                         scan_sub_ = this->create_subscription<sensor_msgs::msg::LaserScan>(
                                 "/scan", 10,
-                                std::bind(&EKFSolo::scan_callback, this, std::placeholders::_1)
+                                std::bind(&BeaconLocalization::scan_callback, this, std::placeholders::_1)
                         );
 
                         balise_point_pub_ = this->create_publisher<visualization_msgs::msg::Marker>(
@@ -62,12 +79,7 @@ class EKFSolo : public rclcpp::Node{
                                 "/obstacles_scan", 10
                         );
 
-                        float a = sqrt(2)/4;
-                        float b = 1 / (4*wheel_distance_from_center);
-                        pseudo_inverse_matrice_roues <<
-                            -a, -a, a, a,
-                            a, -a, -a, a,
-                            b, b, b, b;
+                        tf_broadcaster_ = std::make_unique<tf2_ros::TransformBroadcaster>(*this);
 
                         state_estimation << 0.25, 1.0, 0.0;
 
@@ -87,42 +99,28 @@ class EKFSolo : public rclcpp::Node{
                         Rm_(1, 0) = 0;
                         Rm_(1, 1) = sigma_phi_*sigma_phi_;
 
-                        RCLCPP_INFO(this->get_logger(), "EKFSolo launched successfuly");
+                        RCLCPP_INFO(this->get_logger(), "BeaconLocalization launched successfuly");
                 }
 
 
         private:
 
-                float wheel_radius = 0.03;
-                float wheel_distance_from_center = 0.162635;
                 float r_balise = 0.05;
 
-                float nb_ticks = 4096;
-
-                float e_max = 2e-4;
-                float lambda_glissement = 30;
-                float q = 2*M_PI*wheel_radius/nb_ticks;
-                float sigma_q = q*1/sqrt(12);
-
-                float coefficient_glissement = 0.01;
+                double k_lineaire;
+                double k_angulaire;
+                double k_angulaire_par_metre;
 
                 float gamma_porte = 9.21;
 
-                std::vector<std::string> wheel_names = {"roue_1_joint", "roue_2_joint", "roue_3_joint", "roue_4_joint"};
                 std::vector<std::vector<float>> balises = {{-0.094, 0.05}, {-0.094, 1.95}, {3.094, 1.0}};
-
-                std::vector<float> initial_state;
-                std::vector<std::vector<float>> initial_state_covariance;
 
                 Eigen::Matrix<double, 3, 1> state_estimation;
                 Eigen::Matrix<double, 3, 3> state_covariance_estimation;
                 Eigen::Matrix<double, 3, 3> Q_;
 
-
-
-                Eigen::Matrix<double, 4, 1> joint_state_positions;
-                Eigen::Matrix<double, 3, 4> pseudo_inverse_matrice_roues;
                 bool initialization = true;
+                Eigen::Matrix<double, 3, 1> odom_precedente;
 
                 float sigma_rho_ = 0.02;
                 float sigma_phi_ = 0.013;
@@ -131,43 +129,35 @@ class EKFSolo : public rclcpp::Node{
                 std::deque<HistoryEntry> states_history_;
 
 
-                rclcpp::Subscription<sensor_msgs::msg::JointState>::SharedPtr joint_states_sub_;
-                void onJointStates(const sensor_msgs::msg::JointState::SharedPtr joint_state_msg){
-                    auto positions = joint_state_msg->position;
+                rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr odom_sub_;
+                void onOdometry(const nav_msgs::msg::Odometry::SharedPtr odom_msg){
+                    Eigen::Matrix<double, 3, 1> odom;
+                    odom << odom_msg->pose.pose.position.x, odom_msg->pose.pose.position.y,
+                            yawFromQuaternion(odom_msg->pose.pose.orientation);
 
-                    Eigen::Matrix<double, 4, 1> deltaD;
-                    for (unsigned long int i=0; i<4; i++){
-                        unsigned long int index = std::find(joint_state_msg->name.begin(), joint_state_msg->name.end(), wheel_names[i]) - joint_state_msg->name.begin();
-                        if (index >= positions.size()) return;
+                    if (initialization) {initialization = false; odom_precedente = odom; return;}
 
-                        if (initialization){
-                            joint_state_positions[i] = positions[index];
-                        } else {
-                            deltaD[i] = wheel_radius * (positions[index] - joint_state_positions[i]);
-                            joint_state_positions[i] = positions[index];
-                        }
-                    }
+                    // déplacement entre deux poses odom, ramené dans le repère robot au cap moyen (inverse de prediction())
+                    double dtheta = wrap(odom[2] - odom_precedente[2]);
+                    double theta_m = odom_precedente[2] + dtheta / 2;
+                    double dx = odom[0] - odom_precedente[0];
+                    double dy = odom[1] - odom_precedente[1];
+                    odom_precedente = odom;
 
-                    if (initialization) {initialization = false; return;}
+                    Eigen::Matrix<double, 3, 1> deplacement_robot;
+                    deplacement_robot << cos(theta_m)*dx + sin(theta_m)*dy,
+                                        -sin(theta_m)*dx + cos(theta_m)*dy,
+                                         dtheta;
 
-                    Eigen::Matrix<double, 3, 1> deplacement_robot = pseudo_inverse_matrice_roues * deltaD;
-
-                    float e = deltaD[0] - deltaD[1] + deltaD[2] - deltaD[3];
-
-                    Eigen::Matrix<double, 4, 4> Sigma_deltaD = Eigen::Matrix<double, 4, 4>::Zero();
-                    for (int i=0; i<4; i++){
-                        Sigma_deltaD(i, i) = sigma_q*sigma_q + coefficient_glissement*coefficient_glissement*std::abs(deltaD[i]);
-                    }
-
-                    Eigen::Matrix<double, 3, 3> covariance_deplacement = pseudo_inverse_matrice_roues * Sigma_deltaD * pseudo_inverse_matrice_roues.transpose();
-
-                    if (std::abs(e) > e_max){
-                        covariance_deplacement = lambda_glissement * covariance_deplacement;
-                    }
+                    double d = std::hypot(dx, dy);
+                    Eigen::Matrix<double, 3, 3> covariance_deplacement = Eigen::Matrix3d::Zero();
+                    covariance_deplacement(0, 0) = k_lineaire*k_lineaire*d;
+                    covariance_deplacement(1, 1) = k_lineaire*k_lineaire*d;
+                    covariance_deplacement(2, 2) = k_angulaire*k_angulaire*std::abs(dtheta) + k_angulaire_par_metre*k_angulaire_par_metre*d;
 
                     prediction(state_estimation, state_covariance_estimation, deplacement_robot, covariance_deplacement);
 
-                    double t = toSec(joint_state_msg->header.stamp);
+                    double t = toSec(odom_msg->header.stamp);
                     states_history_.push_back({t, state_estimation, state_covariance_estimation, deplacement_robot, covariance_deplacement});
 
                     // on ne garde que les 200 dernières ms
@@ -175,7 +165,27 @@ class EKFSolo : public rclcpp::Node{
                         states_history_.pop_front();
                     }
 
-                    publish_estimate_position(joint_state_msg->header.stamp);
+                    publish_estimate_position(odom_msg->header.stamp);
+                    publish_map_to_odom(odom_msg->header.stamp, odom);
+                }
+
+                // T_map_odom = T_map_base * T_odom_base^-1
+                std::unique_ptr<tf2_ros::TransformBroadcaster> tf_broadcaster_;
+                void publish_map_to_odom(const builtin_interfaces::msg::Time & stamp, const Eigen::Matrix<double, 3, 1> & odom){
+                    double theta = wrap(state_estimation[2] - odom[2]);
+                    double c = cos(theta);
+                    double s = sin(theta);
+
+                    geometry_msgs::msg::TransformStamped tf;
+                    tf.header.stamp = stamp;
+                    tf.header.frame_id = "map";
+                    tf.child_frame_id = "odom";
+                    tf.transform.translation.x = state_estimation[0] - (c*odom[0] - s*odom[1]);
+                    tf.transform.translation.y = state_estimation[1] - (s*odom[0] + c*odom[1]);
+                    tf.transform.rotation.z = std::sin(0.5 * theta);
+                    tf.transform.rotation.w = std::cos(0.5 * theta);
+
+                    tf_broadcaster_->sendTransform(tf);
                 }
 
                 void prediction(Eigen::Matrix<double, 3, 1> & state_estimation, Eigen::Matrix<double, 3, 3> & state_covariance_estimation,
@@ -569,7 +579,7 @@ class EKFSolo : public rclcpp::Node{
 
 int main(int argc, char * argv[]){
         rclcpp::init(argc, argv);
-        rclcpp::spin(std::make_shared<EKFSolo>());
+        rclcpp::spin(std::make_shared<BeaconLocalization>());
         rclcpp::shutdown();
         return 0;
 }
