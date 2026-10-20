@@ -1,0 +1,85 @@
+{
+  "sequence": 1,
+  "timestamp": 0.0,
+  "arena": {
+    "bounds": {
+      "x_min": 0.0,
+      "x_max": 3.0,
+      "y_min": 0.0,
+      "y_max": 2.0
+    }
+  },
+  "robot": {
+    "pose": {
+      "x": 0.25,
+      "y": 1.0,
+      "z": 0.0,
+      "yaw": 0.0
+    },
+    "pose_age_s": 0.02,
+    "payload_state": "empty",
+    "contact_confirmed": false,
+    "contact_target_id": null,
+    "suction_state": null,
+    "id": "robot_omni"
+  },
+  "cartons": [
+    {
+      "id": "carton_sud_1",
+      "marker_id": 13,
+      "pose": {
+        "x": 1.1,
+        "y": 0.55,
+        "z": 0.055,
+        "yaw": 0.0
+      },
+      "size": {
+        "x": 0.32,
+        "y": 0.11,
+        "z": 0.11
+      },
+      "visible": true,
+      "confidence": 0.98,
+      "age_s": 0.0,
+      "camera_distance": 1.2,
+      "accessible": true,
+      "approach_pose": {
+        "x": 0.85,
+        "y": 0.55,
+        "yaw": 0.0
+      },
+      "posture": "horizontal"
+    }
+  ],
+  "obstacles": [],
+  "other_robots": [],
+  "zones": [
+    {
+      "id": "depot_est",
+      "center": {
+        "x": 2.55,
+        "y": 1.55
+      },
+      "yaw": 0.25,
+      "length": 0.42,
+      "width": 0.34,
+      "capacity": 3,
+      "occupied": 0,
+      "accessible": true,
+      "release_allowed": false,
+      "approach_pose": {
+        "x": 2.25,
+        "y": 1.45,
+        "yaw": 0.25
+      }
+    }
+  ],
+  "mission": {
+    "remaining_s": 80,
+    "score": 0,
+    "cartons_delivered": 0,
+    "cartons_remaining": 5,
+    "total_s": 90
+  },
+  "active_operation": null
+}
