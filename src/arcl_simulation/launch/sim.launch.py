@@ -87,6 +87,11 @@ def generate_launch_description():
         executable="table_markers"
     )
 
+    ventouse_service = Node(
+        package=pkg_name,
+        executable='ventouse_service',
+        output='screen'
+    )
     
 
     aruco_params = os.path.join(
@@ -106,7 +111,7 @@ def generate_launch_description():
         AppendEnvironmentVariable('GZ_SIM_RESOURCE_PATH', os.path.join(pkg, 'worlds')),
         AppendEnvironmentVariable('GZ_SIM_RESOURCE_PATH',os.path.join(pkg, 'models')),
         gz, bridge, rsp, rviz, 
-        robot_control, rock_centering, table_markers,
+        robot_control, rock_centering, table_markers,ventouse_service,
         wheel_odometry, otos_simulator, ekf_odom, beacon_localization,
         aruco_node
     ])

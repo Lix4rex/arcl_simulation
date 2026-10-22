@@ -17,12 +17,18 @@
   <depend>rclcpp</depend>
   <depend>robot_msgs</depend>
   <depend>std_msgs</depend>
+  <depend>std_srvs</depend>
   <depend>sensor_msgs</depend>
   <depend>visualization_msgs</depend>
   <depend>geometry_msgs</depend>
   <depend>eigen</depend>
   <depend>nav_msgs</depend>
   <depend>rclcpp_action</depend>
+  <depend>ros2_aruco_interfaces</depend>
+
+  <test_depend>ament_cmake_pytest</test_depend>
+  <test_depend>ament_index_python</test_depend>
+  <test_depend>rclpy</test_depend>
   <depend>tf2_ros</depend>
 
   <export><build_type>ament_cmake</build_type></export>

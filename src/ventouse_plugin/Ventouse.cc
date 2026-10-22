@@ -2,32 +2,34 @@
 // Sur commande, colle au robot chaque objet (non statique) qui touche une des ventouses,
 // puis lève l'ascenseur. Au lâcher : l'ascenseur redescend, puis les objets sont relâchés.
 //
-//   attraper : gz topic -t /robot_omni/ventouse -m gz.msgs.Boolean -p 'data: true'
-//   lâcher   : gz topic -t /robot_omni/ventouse -m gz.msgs.Boolean -p 'data: false'
+//   ros2 service call /robot_omni/ventouse/set std_srvs/srv/SetBool '{data: true}'
+//   ros2 service call /robot_omni/ventouse/set std_srvs/srv/SetBool '{data: false}'
 //
 // Paramètres SDF (dans le <model> du robot) :
 //   <link>      link qui porte les ventouses               (défaut : chassis)
 //   <collision> collision d'une bouche de ventouse, répétable (au moins une)
-//   <topic>     topic de commande                          (défaut : /model/<robot>/ventouse)
+//   <topic_commande> topic StringMsg des commandes identifiées
+//   <topic_resultat> topic StringMsg des résultats finaux
 //   <topic_ascenseur> topic gz.msgs.Double du JointPositionController de l'ascenseur (optionnel)
 //   <hauteur>   hauteur de levée en m                      (défaut : 0.05)
 //   <delai_lacher> temps de descente avant de relâcher, s  (défaut : 0.7)
 //
-// "attraper" met l'aspiration en marche : elle reste active jusqu'à ce qu'un objet touche
-// une ventouse (il est alors collé et levé) ou jusqu'à "lâcher".
-// Les commandes sont mises en file et exécutées dans l'ordre : on peut enchaîner
-// attraper / lâcher / attraper... sans attendre, rien n'est perdu.
-// État publié (gz.msgs.StringMsg) sur <topic>/etat : "libre", "aspiration", "tenu" ou "descente".
+// Une seule opération est acceptée à la fois, sans file d'attente.
+// Commande : 1 <id> <PING|TAKE|RELEASE> <expiration_unix_ms>
+// Résultat : 1 <id> <OK|ERROR> <code>
+// L'échéance réelle est vérifiée même lorsque la simulation est en pause.
+// État de diagnostic sur /model/<robot>/ventouse/etat (configurable).
 
-#include <deque>
 #include <mutex>
 #include <chrono>
+#include <cstdint>
 #include <memory>
+#include <optional>
 #include <set>
+#include <sstream>
 #include <string>
 #include <vector>
 
-#include <gz/msgs/boolean.pb.h>
 #include <gz/msgs/double.pb.h>
 #include <gz/msgs/stringmsg.pb.h>
 #include <gz/plugin/Register.hh>
@@ -48,15 +50,29 @@ using namespace sim;
 
 class Ventouse : public System, public ISystemConfigure, public ISystemPreUpdate
 {
+  public: ~Ventouse() override
+  {
+    if (!this->topicCommande.empty())
+      this->node.Unsubscribe(this->topicCommande);
+  }
+
   public: void Configure(const Entity &_entity,
                          const std::shared_ptr<const sdf::Element> &_sdf,
                          EntityComponentManager &_ecm, EventManager &) override
   {
+    std::lock_guard<std::mutex> lock(this->mutex);
     this->modele = _entity;
     Model model(_entity);
     const auto nomLink = _sdf->Get<std::string>("link", "chassis").first;
-    const auto topic = _sdf->Get<std::string>(
-        "topic", "/model/" + model.Name(_ecm) + "/ventouse").first;
+    const auto base = "/model/" + model.Name(_ecm) + "/ventouse";
+    const auto topic = _sdf->Get<std::string>("topic_commande", base + "/commande").first;
+    this->topicCommande = topic;
+    this->pubResultat = this->node.Advertise<msgs::StringMsg>(
+        _sdf->Get<std::string>("topic_resultat", base + "/resultat").first);
+    this->pubEtat = this->node.Advertise<msgs::StringMsg>(
+        _sdf->Get<std::string>("topic_etat", base + "/etat").first);
+    // Même un plugin mal configuré doit pouvoir répondre NOT_READY.
+    this->node.Subscribe(topic, &Ventouse::SurCommande, this);
 
     this->link = model.LinkByName(_ecm, nomLink);
     if (this->link == kNullEntity)
@@ -94,8 +110,6 @@ class Ventouse : public System, public ISystemConfigure, public ISystemPreUpdate
       this->avecAscenseur = true;
     }
 
-    this->pubEtat = this->node.Advertise<msgs::StringMsg>(topic + "/etat");
-    this->node.Subscribe(topic, &Ventouse::SurCommande, this);
     gzmsg << "[Ventouse] " << this->bouches.size()
           << " ventouse(s) prête(s), commande sur " << topic << "\n";
     this->ok = true;
@@ -103,19 +117,130 @@ class Ventouse : public System, public ISystemConfigure, public ISystemPreUpdate
 
   private: enum class Etat { LIBRE, ASPIRATION, TENU, DESCENTE };
 
-  private: void SurCommande(const msgs::Boolean &_msg)
+  private: struct Operation
+  {
+    std::string id;
+    bool attraper;
+    std::chrono::steady_clock::time_point echeance;
+    bool commencee{false};
+  };
+
+  private: void PublierResultat(const std::string &_id, bool _success,
+                               const std::string &_code)
+  {
+    msgs::StringMsg msg;
+    msg.set_data("1 " + _id + (_success ? " OK " : " ERROR ") + _code);
+    this->pubResultat.Publish(msg);
+  }
+
+  // Appelée uniquement avec le mutex détenu, après mise à jour de l'état physique.
+  private: void TerminerOperation(bool _success, const std::string &_code)
+  {
+    const auto id = this->operation->id;
+    this->operation.reset();
+    this->PublierResultat(id, _success, _code);
+  }
+
+  private: void SurCommande(const msgs::StringMsg &_msg)
   {
     std::lock_guard<std::mutex> l(this->mutex);
-    this->file.push_back(_msg.data());
+    std::istringstream input(_msg.data());
+    std::string version, id, commande, extra;
+    int64_t expiration;
+    if (!(input >> version >> id))
+    {
+      gzerr << "[Ventouse] commande sans identifiant\n";
+      return;
+    }
+    if (version != "1" || !(input >> commande >> expiration) || (input >> extra) ||
+        (commande != "PING" && commande != "TAKE" && commande != "RELEASE"))
+    {
+      this->PublierResultat(id, false, "INVALID_COMMAND");
+      return;
+    }
+    if (!this->ok)
+    {
+      this->PublierResultat(id, false, "NOT_READY");
+      return;
+    }
+    if (commande == "PING")
+    {
+      this->PublierResultat(id, true, "READY");
+      return;
+    }
+    if (this->operation)
+    {
+      this->PublierResultat(id, false, "BUSY");
+      return;
+    }
+    const auto maintenant = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::system_clock::now().time_since_epoch()).count();
+    if (expiration <= maintenant)
+    {
+      this->PublierResultat(id, false, "TIMEOUT");
+      return;
+    }
+    // Borne le protocole et évite tout débordement lors de la conversion d'horloge.
+    if (expiration > maintenant + 3600000)
+    {
+      this->PublierResultat(id, false, "INVALID_COMMAND");
+      return;
+    }
+    this->operation = Operation{id, commande == "TAKE",
+        std::chrono::steady_clock::now() + std::chrono::milliseconds(expiration - maintenant)};
   }
 
   public: void PreUpdate(const UpdateInfo &_info, EntityComponentManager &_ecm) override
   {
-    if (!this->ok || _info.paused)
+    std::lock_guard<std::mutex> lock(this->mutex);
+    if (!this->ok || !this->operation)
+      return;
+    if (std::chrono::steady_clock::now() >= this->operation->echeance)
+    {
+      if (this->etat == Etat::ASPIRATION)
+        this->ChangerEtat(Etat::LIBRE);
+      else if (this->etat == Etat::DESCENTE)
+      {
+        this->Ascenseur(this->hauteur);
+        this->ChangerEtat(Etat::TENU);  // liaisons conservées
+      }
+      this->TerminerOperation(false, "TIMEOUT");
+      return;
+    }
+    // Les commandes idempotentes ne nécessitent aucun pas de physique.
+    if (!this->operation->commencee)
+    {
+      if (this->operation->attraper && this->etat == Etat::TENU)
+      {
+        this->TerminerOperation(true, "ALREADY_HELD");
+        return;
+      }
+      if (!this->operation->attraper && this->etat == Etat::LIBRE)
+      {
+        this->TerminerOperation(true, "ALREADY_FREE");
+        return;
+      }
+    }
+    if (_info.paused)
       return;
     const double t = std::chrono::duration<double>(_info.simTime).count();
 
-    // Descente en cours : on relâche quand elle est finie, les commandes suivantes attendent.
+    if (!this->operation->commencee)
+    {
+      this->operation->commencee = true;
+      if (this->operation->attraper)
+      {
+        this->ChangerEtat(Etat::ASPIRATION);
+        gzmsg << "[Ventouse] aspiration, contacts : " << this->DecrireContacts(_ecm) << "\n";
+      }
+      else
+      {
+        this->Ascenseur(0.0);
+        this->lacherA = this->avecAscenseur ? t + this->delaiLacher : t;
+        this->ChangerEtat(Etat::DESCENTE);
+      }
+    }
+
     if (this->etat == Etat::DESCENTE)
     {
       if (t < this->lacherA)
@@ -125,41 +250,8 @@ class Ventouse : public System, public ISystemConfigure, public ISystemPreUpdate
       this->liaisons.clear();
       gzmsg << "[Ventouse] lâché\n";
       this->ChangerEtat(Etat::LIBRE);
+      this->TerminerOperation(true, "RELEASED");
       return;                 // contacts à jour au pas suivant
-    }
-
-    // Une commande par pas de simulation, dans l'ordre d'arrivée.
-    bool aCmd = false, cmd = false;
-    {
-      std::lock_guard<std::mutex> l(this->mutex);
-      if (!this->file.empty())
-      {
-        aCmd = true;
-        cmd = this->file.front();
-        this->file.pop_front();
-      }
-    }
-    if (aCmd)
-    {
-      if (cmd && this->etat == Etat::LIBRE)
-      {
-        this->ChangerEtat(Etat::ASPIRATION);
-        gzmsg << "[Ventouse] aspiration en marche, contacts actuels : "
-              << this->DecrireContacts(_ecm) << "\n";
-      }
-      else if (!cmd && this->etat == Etat::ASPIRATION)
-      {
-        gzmsg << "[Ventouse] aspiration coupée (rien attrapé)\n";
-        this->ChangerEtat(Etat::LIBRE);
-      }
-      else if (!cmd && this->etat == Etat::TENU)
-      {
-        this->Ascenseur(0.0);   // redescend d'abord, relâche ensuite
-        this->lacherA = this->avecAscenseur ? t + this->delaiLacher : t;
-        this->ChangerEtat(Etat::DESCENTE);
-        return;
-      }
-      // sinon : attraper alors qu'on tient déjà, ou lâcher alors qu'on est libre -> rien à faire
     }
 
     // Aspiration active : on colle dès qu'un objet touche.
@@ -167,6 +259,7 @@ class Ventouse : public System, public ISystemConfigure, public ISystemPreUpdate
     {
       this->Ascenseur(this->hauteur);
       this->ChangerEtat(Etat::TENU);
+      this->TerminerOperation(true, "TAKEN");
     }
   }
 
@@ -251,13 +344,14 @@ class Ventouse : public System, public ISystemConfigure, public ISystemPreUpdate
   }
 
   private: transport::Node node;
-  private: transport::Node::Publisher pubAscenseur, pubEtat;
+  private: std::string topicCommande;
+  private: transport::Node::Publisher pubAscenseur, pubEtat, pubResultat;
   private: bool avecAscenseur{false};
   private: double hauteur{0.05}, delaiLacher{0.7}, lacherA{-1};
   private: Entity modele{kNullEntity}, link{kNullEntity};
   private: std::vector<Entity> bouches, liaisons;
   private: std::mutex mutex;
-  private: std::deque<bool> file;
+  private: std::optional<Operation> operation;
   private: Etat etat{Etat::LIBRE};
   private: bool ok{false};
 };

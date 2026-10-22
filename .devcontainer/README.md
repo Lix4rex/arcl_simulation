@@ -18,15 +18,16 @@ au `README.md` à la racine du repo pour gérer ces problèmes si besoin.
 
 À la racine du dépôt cloné :
 
-1. Mettre `GPU = "intel"` ou `GPU = "nvidia"` en première ligne de
-   `.devcontainer/select_gpu.py`.
-2. Pour Intel, vérifier l’accès à `/dev/dri` et adapter si nécessaire
-   `--group-add=105` dans `.devcontainer/devcontainer.json.intel` au GID du groupe GPU.
-3. Exécuter **avant d’ouvrir le conteneur** :
+1. Exécuter **avant d’ouvrir le conteneur** :
 
 ```bash
 python3 .devcontainer/select_gpu.py
 ```
+
+   Saisir `1` pour Intel ou `2` pour NVIDIA. Toute autre entrée arrête le script
+   avec un message d’erreur.
+2. Pour Intel, vérifier l’accès à `/dev/dri` et adapter si nécessaire
+   `--group-add=105` dans `.devcontainer/devcontainer.json.intel` au GID du groupe GPU.
 
 Le script crée `.devcontainer/devcontainer.json` et `.devcontainer/Dockerfile`
 à partir de la variante choisie. Les fichiers actifs sont ignorés par Git ;

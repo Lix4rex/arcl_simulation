@@ -1,16 +1,22 @@
-GPU = "nvidia"  # "intel" ou "nvidia" ; exécuter sur l'hôte avant d'ouvrir le conteneur.
-
 from pathlib import Path
 import shutil
 import subprocess
 
 
+def select_gpu():
+    choice = input("Choisissez le GPU (1 : Intel, 2 : NVIDIA) : ").strip()
+    if choice == "1":
+        return "intel"
+    if choice == "2":
+        return "nvidia"
+    raise SystemExit("Choix invalide : entrez 1 (Intel) ou 2 (NVIDIA).")
+
+
 def main():
-    if GPU not in ("intel", "nvidia"):
-        raise SystemExit('GPU doit valoir "intel" ou "nvidia".')
+    gpu = select_gpu()
     folder = Path(__file__).resolve().parent
     names = ("devcontainer.json", "Dockerfile")
-    sources = [folder / f"{name}.{GPU}" for name in names]
+    sources = [folder / f"{name}.{gpu}" for name in names]
     for source in sources:
         if not source.is_file():
             raise SystemExit(f"Modèle absent : {source}")
@@ -25,7 +31,7 @@ def main():
         )
     for source, name in zip(sources, names):
         shutil.copyfile(source, folder / name)
-    print(f"Configuration {GPU} activée. Ouvrir/reconstruire le Dev Container.")
+    print(f"Configuration {gpu} activée. Ouvrir/reconstruire le Dev Container.")
 
 
 if __name__ == "__main__":

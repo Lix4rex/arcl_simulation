@@ -58,8 +58,15 @@
   ros_type_name: sensor_msgs/msg/CameraInfo
   gz_type_name: gz.msgs.CameraInfo
   direction: GZ_TO_ROS
-- ros_topic_name: /robot_omni/ventouse
-  gz_topic_name: /robot_omni/ventouse
-  ros_type_name: std_msgs/msg/Bool
-  gz_type_name: gz.msgs.Boolean
+- ros_topic_name: /robot_omni/ventouse/commande
+  gz_topic_name: /robot_omni/ventouse/commande
+  ros_type_name: std_msgs/msg/String
+  gz_type_name: gz.msgs.StringMsg
   direction: ROS_TO_GZ
+  lazy: false
+- ros_topic_name: /robot_omni/ventouse/resultat
+  gz_topic_name: /robot_omni/ventouse/resultat
+  ros_type_name: std_msgs/msg/String
+  gz_type_name: gz.msgs.StringMsg
+  direction: GZ_TO_ROS
+  lazy: false

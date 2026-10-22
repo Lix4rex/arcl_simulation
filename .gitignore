@@ -1,9 +1,11 @@
-build/*
-install/*
-log/*
-site/*
+build
+install
+log
+site
 core
+
 .vscode
 /.devcontainer/devcontainer.json
 /.devcontainer/Dockerfile
-__pycache__/
+
+__pycache__
