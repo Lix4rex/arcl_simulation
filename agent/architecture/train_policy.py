@@ -14,6 +14,7 @@ import numpy as np
 import torch
 
 from .policy import DEFAULT_CHECKPOINT_PATH, AgentPolicy
+from ..records import RECORD_SCHEMA_VERSION
 
 
 def read_episodes(paths: list[Path], *, robot_id: str | None = None) -> tuple[dict[str, list[dict]], dict[str, int]]:
@@ -38,6 +39,10 @@ def read_episodes(paths: list[Path], *, robot_id: str | None = None) -> tuple[di
                     raise ValueError(f"{path}:{line_number}: invalid JSON") from error
                 if not isinstance(row, dict) or not isinstance(row.get("episode_id"), str):
                     raise ValueError(f"{path}:{line_number}: missing episode_id")
+                if row.get("record_schema_version") != RECORD_SCHEMA_VERSION:
+                    raise ValueError(
+                        f"{path}:{line_number}: unsupported record schema; expected v{RECORD_SCHEMA_VERSION}"
+                    )
                 identifier = row["episode_id"]
                 if identifier in locations and locations[identifier] != path:
                     raise ValueError(f"duplicate episode {identifier!r} in multiple files")
@@ -70,11 +75,13 @@ def read_episodes(paths: list[Path], *, robot_id: str | None = None) -> tuple[di
                 if not isinstance(behavior, dict) or behavior.get("sampled") is not True:
                     continue
                 observation = observations.get(robot)
+                if isinstance(observation, dict) and observation.get("schema_version") != 2:
+                    raise ValueError(f"episode {identifier}: unsupported observation schema; expected v2")
                 values = (behavior.get("log_prob"), behavior.get("value"), targets.get(robot))
                 if not isinstance(observation, dict) or any(
                     isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value)
                     for value in values
-                ) or values[0] > 1e-6:
+                ):
                     raise ValueError(f"episode {identifier}: invalid behavior/return for {robot}")
                 samples.append({"observation": observation, "decision": decision,
                                 "old_log_prob": float(values[0]), "old_value": float(values[1]),

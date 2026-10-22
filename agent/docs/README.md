@@ -6,10 +6,18 @@ le déroulement d’un épisode et les détails PPO sont dans [doc.md](doc.md).
 ## Installation
 
 ```sh
-python3 -m venv --system-site-packages .venv
-source .venv/bin/activate
-python3 -m pip install -r agent/requirements.txt
+python3 -m pip install --user --break-system-packages 'numpy>=1.24'
+python3 -m pip uninstall --break-system-packages -y torch
+python3 -m pip install --user --break-system-packages 'torch==2.14.1+cpu' \
+  --index-url https://download.pytorch.org/whl/cpu
+python3 -c 'import torch; print(torch.__version__, torch.version.cuda)'
 ```
+
+Sur Ubuntu 24.04, `--break-system-packages` est requis par pip pour le Python
+géré par la distribution ; `--user` installe les paquets dans `~/.local`, sans
+`sudo` et sans environnement virtuel. Utiliser le même `python3` pour lancer
+l’observer et l’agent. L’index PyTorch sélectionné fournit le wheel CPU, sans
+runtime CUDA ; `torch.version.cuda` doit afficher `None`.
 
 Pour la simulation ROS/Gazebo : compiler le workspace avec `./build.sh`, puis
 sourcer `install/setup.bash`. Le backend RL et les fonctions de récompense
@@ -43,23 +51,21 @@ python3 -m agent.architecture.world_observer --carton-source gazebo_sim \
       --model checkpoints/policy.pt --records runs/live
 ```
 
-Cette commande exécute réellement les actions ROS. `--ros-setup chemin/setup.bash`
-permet de choisir un autre overlay. Une pose absente impose l'attente ;
-une charge inconnue ne bloque pas les actions.
-L'observateur lance son propre bridge Gazebo vers ROS pour
-`/robot_omni/ventouse/etat` et renseigne `robot.suction_state`.
-Le plugin publie uniquement aux changements d'état : avant le premier message,
-la valeur reste `None`, puis la dernière valeur est conservée. Si le bridge
-s'arrête ou si le message est invalide, elle redevient `None`. Ce flux ne fournit
-ni heartbeat ni détection d'un redémarrage du simulateur ; l'âge du dernier
-événement figure dans `sources.suction.age_s`.
-La charge, l'objet tenu et les contacts restent `None`.
+Cette commande publie les déplacements `PoseStamped` sur `/goal_pose`, et utilise
+les trois services de ventouse et celui du poignet. Le topic de déplacement ne
+fournit pas d’accusé de fin : l’exécuteur confirme par pose et vitesse fraîches,
+sinon il garde le verrou `unknown`. Une pose ou un angle de poignet inconnu
+masque les ordres dépendants. Les états de ventouse restent inconnus si leurs
+topics ne sont pas reliés à ROS.
 Les zones et obstacles fixes se renseignent dans `agent/architecture/arena_map.json`.
+La cadence par défaut est 10 Hz. `--robot-margin` (0,20 m) réserve une marge
+sur les limites de carte ; `--velocity-scale` configure l’échelle de
+normalisation des vitesses lors de la création d’un checkpoint.
 
 Le runner s’arrête sur le signal de fin de match ou un temps restant nul.
 Les journaux live conservent les décisions et le résultat connu, mais ne sont
 pas des données PPO récompensées. Pour l’entraînement RL, utiliser la collecte
-ci-dessous. `--sample-actions` active l’échantillonnage dans le runner si nécessaire.
+ci-dessous. `--sample-actions` active l’échantillonnage pendant la collecte live.
 
 ## Collecter des épisodes RL
 

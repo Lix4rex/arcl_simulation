@@ -13,10 +13,7 @@ import uuid
 from pathlib import Path
 from typing import Any, Callable, Mapping, Protocol
 
-import numpy as np
-
 from ..architecture.policy import ACTIONS
-from ..architecture.world_encoder import opponent_obstacle
 from ..records import EpisodeRecords
 
 
@@ -92,95 +89,13 @@ def winner_from_world(
     return (first if scores[first] > scores[second] else second), True
 
 
-def canonicalize_world(world: dict[str, Any], controlled_robot_id: str) -> dict[str, Any]:
-    """Express a map-frame snapshot in the controlled robot's current frame.
-
-    The controlled robot becomes (0, 0, yaw=0); every other pose and
-    oriented rectangle is translated and rotated with it. IDs remain unchanged,
-    so a selected target can still be resolved against the original world.
-    """
-    result = copy.deepcopy(world)
-    robots = _robot_entries(result)
-    matches = [robot for robot in robots if str(robot.get("id")) == controlled_robot_id]
-    if len(matches) != 1:
-        raise ValueError(f"world must contain robot {controlled_robot_id!r} exactly once")
-    controlled = matches[0]
-    others = [robot for robot in robots if robot is not controlled]
-    result["robot"] = controlled
-    result["other_robots"] = others
-    result.pop("robots", None)
-
-    origin = _pose(result["robot"].get("pose"), "robot.pose")
-    ego_x, ego_y, ego_yaw = origin["x"], origin["y"], origin["yaw"]
-    cosine, sine = math.cos(ego_yaw), math.sin(ego_yaw)
-
-    _transform_arena_bounds(result, ego_x, ego_y, cosine, sine)
-    _transform_record(result["robot"], ego_x, ego_y, cosine, sine, ego_yaw)
-    for robot in result["other_robots"]:
-        _transform_record(robot, ego_x, ego_y, cosine, sine, ego_yaw)
-    for group in ("cartons", "aruco_detections", "obstacles", "zones"):
-        for entity in result.get(group, []):
-            _transform_record(entity, ego_x, ego_y, cosine, sine, ego_yaw)
-    operation = result.get("active_operation")
-    if isinstance(operation, dict):
-        _transform_record(operation, ego_x, ego_y, cosine, sine, ego_yaw)
-
-    robot_pose = result["robot"].get("pose")
-    if isinstance(robot_pose, dict):
-        robot_pose["x"] = 0.0
-        robot_pose["y"] = 0.0
-        robot_pose["yaw"] = 0.0
-    return result
-
-
-def canonicalize_observation(
-    observation: dict[str, Any], robot_id: str, *, max_pose_age_s: float = 0.75
-) -> dict[str, Any]:
-    """Canonicalize when the estimated pose is usable; preserve unknown pose otherwise."""
-    robot = observation.get("robot")
-    if not isinstance(robot, dict) or not isinstance(robot.get("pose"), dict):
-        result = copy.deepcopy(observation)
-        result["ego_frame_status"] = "unknown"
-        return _opponents_as_obstacles(result)
-    pose_age = robot.get("pose_age_s")
-    if pose_age is not None and _number(pose_age, math.inf) > max_pose_age_s:
-        result = copy.deepcopy(observation)
-        result["ego_frame_status"] = "stale"
-        return _opponents_as_obstacles(result)
-    try:
-        result = canonicalize_world(observation, robot_id)
-    except ValueError:
-        result = copy.deepcopy(observation)
-        result["ego_frame_status"] = "unknown"
-        return _opponents_as_obstacles(result)
-    result["ego_frame_status"] = "canonical"
-    return _opponents_as_obstacles(result)
-
-
-def _opponents_as_obstacles(observation: dict[str, Any]) -> dict[str, Any]:
-    observation.setdefault("obstacles", []).extend(
-        opponent_obstacle(robot) for robot in observation.get("other_robots", [])
-    )
-    observation["other_robots"] = []
-    records = [observation.get("robot", {})]
-    for group in ("cartons", "obstacles", "zones", "aruco_detections"):
-        records.extend(observation.get(group, []))
-    for record in records:
-        if not isinstance(record, dict):
-            continue
-        record.pop("velocity", None)
-        if isinstance(record.get("held_object"), dict):
-            record["held_object"].pop("velocity", None)
-    return observation
-
-
 class TwoRobotArenaEnv:
     """Gym-like joint-action wrapper with a 90-second game-time horizon.
 
     `advance` receives both decisions and the remaining time budget. Its result
     must contain the simulator-truth `world`, per-robot `observations`, and
     optional per-robot `responses`. Truth is used for match results, rewards
-    and records; egocentric canonicalization is applied to observations only.
+    and records; policy observations remain in the absolute map frame.
     """
 
     def __init__(
@@ -190,6 +105,7 @@ class TwoRobotArenaEnv:
         controlled_robot_id: str,
         opponent_robot_id: str,
         episode_seconds: float = 90.0,
+        robot_margin_m: float = 0.20,
         records_path: str | Path | None = "runs/episodes",
         gamma: float = 0.99,
         action_rewarder: RewardFunction | None = None,
@@ -201,9 +117,12 @@ class TwoRobotArenaEnv:
             raise ValueError("episode_seconds must be positive")
         if not math.isfinite(gamma) or not 0.0 <= gamma <= 1.0:
             raise ValueError("gamma must be between zero and one")
+        if not math.isfinite(robot_margin_m) or robot_margin_m < 0.0:
+            raise ValueError("robot_margin_m must be finite and non-negative")
         self.advance = advance
         self.robot_ids = (controlled_robot_id, opponent_robot_id)
         self.episode_seconds = float(episode_seconds)
+        self.robot_margin_m = float(robot_margin_m)
         self.records_path = Path(records_path) if records_path is not None else None
         self.gamma = gamma
         self.records: EpisodeRecords | None = None
@@ -249,7 +168,7 @@ class TwoRobotArenaEnv:
     def step(
         self,
         controlled_action: str | dict[str, Any],
-        opponent_action: str | dict[str, Any] = "WAIT",
+        opponent_action: str | dict[str, Any] = "IDLE",
     ) -> tuple[dict[str, Any], dict[str, float] | None, bool, bool, dict[str, Any]]:
         try:
             return self._step(controlled_action, opponent_action)
@@ -273,7 +192,7 @@ class TwoRobotArenaEnv:
         }
         policy_observations_before = self.agent_observations
         backend_actions = {
-            robot_id: _backend_action(actions[robot_id], self.observations[robot_id])
+            robot_id: _backend_action(actions[robot_id], self.observations[robot_id], self.robot_margin_m)
             for robot_id in self.robot_ids
         }
         self._record({"kind": "decision", "step": self.steps + 1,
@@ -377,7 +296,7 @@ class TwoRobotArenaEnv:
 
     @property
     def agent_observations(self) -> dict[str, dict[str, Any]]:
-        """Return the current observation for each policy in its own ego frame."""
+        """Return the versioned map-frame observation for each policy."""
         if self.observations is None:
             raise RuntimeError("call reset({world, observations}) before reading observations")
         return {
@@ -386,7 +305,11 @@ class TwoRobotArenaEnv:
         }
 
     def _policy_observation(self, observation: dict[str, Any], robot_id: str) -> dict[str, Any]:
-        result = canonicalize_observation(observation, robot_id)
+        result = copy.deepcopy(observation)
+        if result.get("schema_version") != 2:
+            raise ValueError("backend observations must use schema_version 2 map-frame inputs")
+        if str(result.get("robot", {}).get("id")) != robot_id:
+            raise ValueError(f"observation robot ID does not match {robot_id!r}")
         if not isinstance(result.get("mission"), dict):
             result["mission"] = {}
         result["mission"]["total_s"] = self.episode_seconds
@@ -450,115 +373,6 @@ def _state_pair(
     }
 
 
-def _transform_record(
-    record: dict[str, Any],
-    ego_x: float,
-    ego_y: float,
-    cosine: float,
-    sine: float,
-    ego_yaw: float,
-) -> None:
-    if not isinstance(record, dict):
-        return
-    pose_keys = ("pose", "center", "approach_pose", "target_pose")
-    transformed = False
-    for key in pose_keys:
-        pose = record.get(key)
-        if isinstance(pose, dict):
-            transformed_pose = _transform_pose(pose, ego_x, ego_y, cosine, sine, ego_yaw)
-            record[key] = transformed_pose
-            transformed = transformed or key in ("pose", "center")
-    if not transformed and "x" in record and "y" in record:
-        record.update(_transform_pose(record, ego_x, ego_y, cosine, sine, ego_yaw))
-    else:
-        # Flat poses already had their heading transformed by _transform_pose.
-        for key in ("yaw", "theta"):
-            if key in record and record[key] is not None:
-                record[key] = _wrap(_number(record[key]) - ego_yaw)
-
-    held = record.get("held_object")
-    if isinstance(held, dict):
-        _transform_record(held, ego_x, ego_y, cosine, sine, ego_yaw)
-
-    normal = record.get("normal")
-    if isinstance(normal, dict) and all(math.isfinite(_number(normal.get(key), math.nan)) for key in ("x", "y")):
-        nx, ny = float(normal["x"]), float(normal["y"])
-        normal["x"], normal["y"] = cosine * nx + sine * ny, -sine * nx + cosine * ny
-
-
-def _transform_pose(
-    pose: dict[str, Any],
-    ego_x: float,
-    ego_y: float,
-    cosine: float,
-    sine: float,
-    ego_yaw: float,
-) -> dict[str, Any]:
-    result = copy.deepcopy(pose)
-    position = result.get("position")
-    if not isinstance(position, dict):
-        position = result
-    if all(key in position and position[key] is not None for key in ("x", "y")):
-        x = _number(position["x"]) - ego_x
-        y = _number(position["y"]) - ego_y
-        local_x = cosine * x + sine * y
-        local_y = -sine * x + cosine * y
-        position["x"] = local_x
-        position["y"] = local_y
-    if position is not result:
-        result["position"] = position
-    for key in ("yaw", "theta"):
-        if key in result and result[key] is not None:
-            result[key] = _wrap(_number(result[key]) - ego_yaw)
-    return result
-
-
-def _transform_arena_bounds(
-    world: dict[str, Any], ego_x: float, ego_y: float, cosine: float, sine: float
-) -> None:
-    arena = world.get("arena")
-    if not isinstance(arena, dict):
-        return
-    bounds = arena.get("bounds", arena)
-    if not isinstance(bounds, dict):
-        return
-    values = [_number(bounds.get(key), math.nan) for key in ("x_min", "x_max", "y_min", "y_max")]
-    if not all(math.isfinite(value) for value in values):
-        return
-    x_min, x_max, y_min, y_max = values
-    existing = arena.get("corners")
-    corners = np.asarray(
-        [[point["x"], point["y"]] for point in existing] if existing is not None else
-        [[x_min, y_min], [x_max, y_min], [x_max, y_max], [x_min, y_max]],
-        dtype=np.float64,
-    )
-    offsets = corners - np.asarray([ego_x, ego_y])
-    rotation = np.asarray([[cosine, sine], [-sine, cosine]], dtype=np.float64)
-    local = offsets @ rotation.T
-    arena["corners"] = [{"x": float(x), "y": float(y)} for x, y in local]
-    target = bounds if "bounds" in arena else arena
-    target.update({
-        "x_min": float(local[:, 0].min()),
-        "x_max": float(local[:, 0].max()),
-        "y_min": float(local[:, 1].min()),
-        "y_max": float(local[:, 1].max()),
-    })
-
-
-def _pose(value: Any, label: str) -> dict[str, float]:
-    if not isinstance(value, dict):
-        raise ValueError(f"{label} must be an object")
-    position = value.get("position", {})
-    if not isinstance(position, dict):
-        position = {}
-    x = _number(value.get("x", position.get("x")), math.nan)
-    y = _number(value.get("y", position.get("y")), math.nan)
-    yaw = _number(value.get("yaw", value.get("theta")), math.nan)
-    if not all(math.isfinite(number) for number in (x, y, yaw)):
-        raise ValueError(f"{label} needs finite x, y and yaw")
-    return {"x": x, "y": y, "yaw": yaw}
-
-
 def _game_time(world: dict[str, Any]) -> float:
     value = _number(world.get("game_time_s", world.get("timestamp")), math.nan)
     if not math.isfinite(value):
@@ -592,22 +406,69 @@ def _score_map(world: dict[str, Any], robot_ids: tuple[str, str]) -> dict[str, f
     return None
 
 
-def _backend_action(action: dict[str, Any], observation: dict[str, Any]) -> dict[str, Any]:
+def _backend_action(action: dict[str, Any], observation: dict[str, Any], robot_margin_m: float = 0.20) -> dict[str, Any]:
     result = copy.deepcopy(action)
     if "world_sequence" in result and result["world_sequence"] != observation.get("sequence"):
         raise ValueError("decision is based on a stale observation sequence")
-    if result["action"] in ("CENTER", "TAKE", "WAIT"):
-        for key in ("target_id", "zone_id", "target_pose"):
-            result.pop(key, None)
-    if result["action"] in ("GO_TO_CARTON", "GO_TO_ZONE"):
-        group, key = ("cartons", "target_id") if result["action"] == "GO_TO_CARTON" else ("zones", "zone_id")
-        matches = [item for item in observation.get(group, []) if item.get("id") == result.get(key)]
-        if result.get(key) is None or len(matches) != 1:
-            raise ValueError("navigation target must identify exactly one observed entity")
-        pose = matches[0].get("approach_pose")
-        _pose(pose, "navigation approach_pose")
-        # The policy saw an ego-frame pose; the backend receives the original map pose.
-        result["target_pose"] = copy.deepcopy(pose)
+    active = observation.get("active_operation")
+    if "active_operation" not in observation:
+        if result["action"] != "IDLE":
+            raise ValueError("active-operation state is unknown; only IDLE is valid")
+    elif isinstance(active, dict) and active.get("status") in ("issuing", "running", "cancel_requested", "canceling", "unknown"):
+        if active.get("type") == "MOVE" and active.get("cancelable") is True and active.get("status") in ("issuing", "running"):
+            if result["action"] not in ("IDLE", "CANCEL"):
+                raise ValueError("only IDLE or CANCEL is valid during an active move")
+        elif result["action"] != "IDLE":
+            raise ValueError("only IDLE is valid during a non-cancelable operation")
+    elif active is not None and (not isinstance(active, dict) or active.get("status") not in (
+        "succeeded", "failed", "canceled", "rejected"
+    )):
+        if result["action"] != "IDLE":
+            raise ValueError("active-operation state is unknown; only IDLE is valid")
+    elif result["action"] == "CANCEL":
+        raise ValueError("CANCEL requires an active cancelable move")
+    if result["action"] == "MOVE":
+        robot = observation.get("robot") if isinstance(observation.get("robot"), dict) else {}
+        pose = robot.get("pose")
+        sources = observation.get("sources") if isinstance(observation.get("sources"), dict) else {}
+        pose_source = sources.get("robot_pose") if isinstance(sources.get("robot_pose"), dict) else {}
+        if (not isinstance(pose, dict) or pose_source.get("fresh", True) is not True
+                or _number(robot.get("pose_age_s"), math.inf) > 0.75
+                or not all(math.isfinite(_number(pose.get(key), math.nan)) for key in ("x", "y", "yaw"))):
+            raise ValueError("MOVE requires a fresh robot pose")
+        target = result.get("target_pose")
+        if not isinstance(target, dict):
+            raise ValueError("MOVE requires an absolute target_pose")
+        x = _number(target.get("x"), math.nan)
+        y = _number(target.get("y"), math.nan)
+        sine = _number(target.get("sin"), math.nan)
+        cosine = _number(target.get("cos"), math.nan)
+        if not all(math.isfinite(value) for value in (x, y, sine, cosine)):
+            raise ValueError("MOVE target must contain finite x, y, sin and cos")
+        arena = observation.get("arena") if isinstance(observation.get("arena"), dict) else {}
+        bounds = arena.get("bounds", arena)
+        if not isinstance(bounds, dict):
+            raise ValueError("arena bounds are unavailable")
+        margin = robot_margin_m
+        if not (float(bounds.get("x_min", 0.0)) + margin <= x <= float(bounds.get("x_max", 3.0)) - margin
+                and float(bounds.get("y_min", 0.0)) + margin <= y <= float(bounds.get("y_max", 2.0)) - margin):
+            raise ValueError("MOVE target lies outside the robot-center arena bounds")
+        norm = math.hypot(sine, cosine)
+        if norm < 1e-6:
+            raise ValueError("MOVE target orientation vector has near-zero norm")
+        result["target_pose"] = {"x": x, "y": y, "sin": sine / norm, "cos": cosine / norm}
+    elif result["action"] == "TOGGLE_WRIST":
+        robot = observation.get("robot") if isinstance(observation.get("robot"), dict) else {}
+        wrist = _number(robot.get("wrist_angle_rad"), math.nan)
+        sources = observation.get("sources") if isinstance(observation.get("sources"), dict) else {}
+        wrist_source = sources.get("wrist") if isinstance(sources.get("wrist"), dict) else {}
+        if (not math.isfinite(wrist) or wrist_source.get("fresh", True) is not True
+                or _number(wrist_source.get("age_s"), math.inf) > 1.0):
+            raise ValueError("TOGGLE_WRIST requires a fresh measured wrist angle")
+    elif result["action"] not in ("IDLE", "CANCEL") and not result["action"].startswith("SUCTION_"):
+        raise ValueError(f"unsupported action: {result['action']!r}")
+    if result["action"] != "MOVE":
+        result.pop("target_pose", None)
     return result
 
 
@@ -640,9 +501,5 @@ def _number(value: Any, default: float = 0.0) -> float:
     except (TypeError, ValueError):
         return default
     return result if math.isfinite(result) else default
-
-
-def _wrap(angle: float) -> float:
-    return (angle + math.pi) % (2.0 * math.pi) - math.pi
 
 

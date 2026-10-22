@@ -1,4 +1,5 @@
 {
+  "schema_version": 2,
   "sequence": 1,
   "timestamp": 0.0,
   "arena": {
@@ -17,10 +18,18 @@
       "yaw": 0.0
     },
     "pose_age_s": 0.02,
-    "payload_state": "empty",
-    "contact_confirmed": false,
-    "contact_target_id": null,
-    "suction_state": null,
+    "velocity": {
+      "x": 0.0,
+      "y": 0.0,
+      "yaw": 0.0
+    },
+    "wrist_angle_rad": 0.0,
+    "suction_states": {
+      "1": "free",
+      "2": "free",
+      "3": "free"
+    },
+    "payload_state": null,
     "id": "robot_omni"
   },
   "cartons": [
@@ -81,5 +90,14 @@
     "cartons_remaining": 5,
     "total_s": 90
   },
-  "active_operation": null
+  "active_operation": null,
+  "last_action_result": null,
+  "sources": {
+    "robot_pose": {"status": "fresh", "fresh": true, "age_s": 0.02},
+    "velocity": {"status": "fresh", "fresh": true, "age_s": 0.02},
+    "wrist": {"status": "fresh", "fresh": true, "age_s": 0.02},
+    "suction_1": {"status": "fresh", "fresh": true, "age_s": 0.02},
+    "suction_2": {"status": "fresh", "fresh": true, "age_s": 0.02},
+    "suction_3": {"status": "fresh", "fresh": true, "age_s": 0.02}
+  }
 }

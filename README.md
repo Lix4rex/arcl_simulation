@@ -4,6 +4,12 @@ Simulation Gazebo Harmonic / ROS 2 Jazzy de la table Eurobot 2027 et du robot ho
 
 ## Lancer la simulation
 
+La simulation nécessite aussi `robot_localization` :
+
+```bash
+sudo apt install ros-jazzy-robot-localization
+```
+
 ```bash
 ./build.sh
 source install/setup.bash

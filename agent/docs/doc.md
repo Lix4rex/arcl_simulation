@@ -6,8 +6,8 @@
 |---|---|
 | `world_observer.py` | Assemble les observations ROS en snapshots NDJSON. |
 | `gazebo_pose_source.py` | Fournit uniquement les poses des cartons du simulateur, comme substitut explicite de la caméra externe. |
-| `world_encoder.py` | Construit les caractéristiques normalisées puis les embeddings des familles d’entités. |
-| `policy.py` | Politique masquée, sélection de cible et estimation de valeur. |
+| `world_encoder.py` | Encode les caractéristiques v2 en ensembles de cartons et obstacles, puis applique une attention conditionnée par le robot. |
+| `policy.py` | Politique hybride masquée : type d’ordre, cible continue de déplacement et estimation de valeur. |
 | `action_executor.py` / `run_agent.py` | Exécution ROS asynchrone et journalisation de l’utilisation live. |
 | `rl/environment.py` / `rl/collect.py` | Match à deux robots, collecte stochastique, résultats et récompenses. |
 | `records.py` / `train_policy.py` | Finalisation des fichiers puis mises à jour PPO et validation. |
@@ -15,7 +15,11 @@
 Les cartons viennent de la caméra externe, ici remplacée explicitement par les
 poses des seuls modèles Gazebo `pierre_*`. La pose de notre robot vient de
 `/pose_estimation`, les obstacles de `/obstacles_scan` et les tags de
-`/aruco_markers`. Aucun repli vers la pose vraie du robot n’est autorisé.
+`/aruco_markers`. Vitesse, angle du poignet et états des ventouses proviennent
+respectivement de `/odometry/filtered`, `/joint_states` et des topics
+`/robot_omni/ventouse_<n>/etat` lorsqu’ils sont reliés à ROS. Sans bridge, les
+états des ventouses restent inconnus. Aucun repli vers la pose vraie du robot
+n’est autorisé.
 Le backend RL fournit séparément la vérité `world` et les `observations` de
 chaque robot. La vérité sert aux points et aux journaux, jamais à reconstruire
 une observation manquante. Pour une politique, l’adversaire est un obstacle
@@ -26,15 +30,9 @@ Les mesures périmées restent inconnues. Les ArUco sont transformés depuis
 fabrique pas d’identité de carton. Le décalage temporel pose/image est contrôlé.
 L’assembleur ne déduit pas une charge vide de l’absence de mesure.
 
-L'observateur ouvre un bridge Gazebo vers ROS uniquement pour
-`/robot_omni/ventouse/etat` (`gz.msgs.StringMsg` vers `std_msgs/msg/String`).
-Les transitions `libre`, `aspiration`, `tenu`, `descente` alimentent respectivement
-`suction_state`: `free`, `aspirating`, `holding`, `lowering`. Ce flux publie aux
-changements, pas périodiquement : aucun état initial n'est supposé et le dernier
-événement est conservé, avec son âge dans `sources.suction`. L'arrêt du bridge
-ou un message invalide invalide cet état. Une coupure Gazebo silencieuse ou un
-redémarrage du simulateur n'est pas détectable par ce seul flux.
-`payload_state`, `held_object` et les contacts ne sont pas déduits de cet état.
+Les états des trois ventouses gardent leur valeur et leur âge séparément. Un état
+inconnu ne vaut ni ventouse libre ni charge vide. `payload_state`, `held_object`
+et les contacts ne sont pas déduits des états d’actionneur.
 
 ## Contrat des snapshots
 
@@ -44,24 +42,19 @@ snapshot et `timestamp` est le temps de référence en secondes. Le producteur
 perception doit transformer les sources ROS dans ce repère et fournir des pistes
 stables : les IDs ArUco partagés ne sont pas des IDs de carton.
 
-Chaque ligne est un objet avec ces champs :
+Chaque ligne est un snapshot `schema_version: 2`, dans le repère absolu `map` :
 
 - `sequence`, `timestamp`, `arena.bounds` (`x_min`, `x_max`, `y_min`, `y_max`).
-- `robot.pose` (`x`, `y`, `z`, `yaw`) estimée et `pose_age_s`. Une pose périmée
-  devient `null` et la politique répond `WAIT`. `suction_state`, `payload_state`,
-  `held_object`, `contact_confirmed` et `contact_target_id` peuvent être `null`
-  quand aucune source fiable ne les fournit.
-- `suction_state` distingue `free`, `aspirating`, `holding` et `lowering`.
-  Il décrit l'actionneur ; `payload_state` décrit la charge estimée. L'un n'est
-  pas inventé à partir de l'autre.
+- `robot.pose` (`x`, `y`, `z`, `yaw`) estimée, `velocity` en `map`, leur âge,
+  `wrist_angle_rad` et `suction_states` indexé de 1 à 3. Chaque champ facultatif
+  peut rester inconnu lorsqu’aucune source valide ne l’a mesuré.
 - `cartons`, `obstacles` : listes d'entités avec un `id` interne
   stable, `pose`, `size`, `confidence`, `age_s`, `visible` et `accessible`
   quand disponibles. Un carton donne aussi `posture` (`vertical` ou `horizontal`), `marker_id` et
   `approach_pose` ; `camera_distance` (ou `distance`) peut décrire la portée
   mesurée d'un tag visible. Le centrage ROS ne dépend pas de cette association
   à un carton. Ce tag reste une observation, pas l'identité du carton.
-- `other_robots` reste accepté comme entrée : seule sa position `x,y` est
-  transférée aux obstacles de la politique, sans cap, charge ou état de ventouse.
+- `other_robots` reste accepté ; son cercle est ajouté à l’ensemble des obstacles.
 - `aruco_detections` : détections locales transformées en `map`, avec leur âge,
   normale de face `normal` (`x,y,z`), profondeur optique `camera_depth`,
   portée et carton associé si l'association est unique. Les détections ambiguës
@@ -73,10 +66,9 @@ Chaque ligne est un objet avec ces champs :
   Ces informations sont des observations pour le réseau, pas des conditions
   imposées avant de commander un dépôt.
 - `mission` : `total_s` (90 par défaut), `remaining_s`, score et compteurs de cartons quand disponibles.
-- `active_operation` : opération en cours si un contrôleur externe en a une,
-  avec `type`, `status` (`issuing`, `running` ou `unknown`), cible éventuelle,
-  `target_pose`, `elapsed_s` et `timeout_s` quand connus. L'exécuteur
-  conserve lui-même l'état de ses processus.
+- `active_operation` et `last_action_result` : type, paramètres de déplacement,
+  statut, échec et `cancelable`. Les retours exploités par la politique sont
+  limités à ces statuts ; aucune progression d’exécution n’est encodée.
 
 Les tableaux doivent contenir toutes les pistes pertinentes, et non uniquement
 la cible la plus proche. Une donnée inconnue reste inconnue : ne pas publier un
@@ -86,79 +78,55 @@ pas seulement la présence d'une pose cible.
 
 ### Encodage et normalisation
 
-Chaque famille a son propre petit encodeur. Aucun tableau n'est tronqué ; les
-vecteurs individuels sont conservés, puis leurs moyennes et leurs effectifs
-alimentent le contexte global. `WorldEncoder.feature_dicts(snapshot)` expose
-tous les scalaires nommés avant cette compression apprise, ainsi que la matrice
-d'association ArUco/cartons. `feature_names` donne l'ordre des entrées.
-
-| Information | Représentation dans le réseau |
-|---|---|
-| Positions | `x,y` dans les axes de la table, normalisés par ses bornes entre 0 et 1 ; `z` et dimensions divisés par le plus grand côté de la table. |
-| Cartons | Posture explicite ; `(sin(4θ)+1)/2, (cos(4θ)+1)/2` si vertical, facteur 2 si horizontal. Les angles sont relatifs aux axes de la table. |
-| Robot et approches | Cap dirigé avec facteur 1 : deux orientations opposées restent distinctes. |
-| Ventouse et charge | Catégories séparées, avec un état inconnu. Le carton porté conserve position, posture, orientation et dimensions ; son identité sert à marquer la piste correspondante. |
-| Actions | Type exact, statut, pose objectif, cibles marquées dans les listes, temps écoulé/délai ; dernier type, résultat et cible également conservés. |
-| ArUco | Position, normale de face, profondeur optique, fraîcheur, confiance et association. Les détections non associées sont encodées aussi ; un indicateur distingue les tags ID 13 utilisables par le centrage des autres tags. |
-| Mission | Temps restant/temps total, sans doublon dans le robot ; score et compteurs s'ils sont connus. |
-
-Les sinus/cosinus et composantes de normale sont ramenés de `[-1,1]` à `[0,1]`.
-Les âges sont divisés par le temps total. Effectifs, capacités et autres
-quantités positives sans maximum configuré utilisent `n/(1+n)` ; le score,
-éventuellement signé, utilise `0.5 + s/(2*(1+abs(s)))`. Ces transformations sont
-inversibles : aucune saturation ne confond deux mesures hors des bornes
-habituelles. Une position hors table ou un délai dépassé peut donc dépasser 1.
-
-Chaque mesure facultative a un indicateur `_known` : inconnu reste distinct
-de zéro ou de faux, et une confiance absente ne devient pas 1. L'état des
-sources distingue une liste vide observée d'une source indisponible. Les
-vitesses, le contact, les IDs numériques et les métadonnées de provenance ne
-sont pas appris ; les IDs servent uniquement aux associations et aux cibles.
-Les bornes réelles de l'arène sont conservées par ses quatre coins lors d'un
-changement de repère, pour obtenir le même encodage depuis `map` ou la vue ego.
+Le schéma exige `schema_version: 2`. Les positions absolues sont normalisées
+par les bornes de la carte ; les angles sont représentés par sinus/cosinus.
+Chaque carton et obstacle reçoit un embedding 32D. Une attention à quatre têtes,
+conditionnée par le robot et le contexte, agrège les deux ensembles sans
+dépendre de l’ordre des entités ni tronquer leur nombre. Les inconnues gardent
+un indicateur de validité et leur âge lorsqu’il est mesuré. Les IDs et les
+détections ArUco ne sont pas des caractéristiques apprises.
+Les vitesses linéaires sont divisées par une échelle configurable
+(`--velocity-scale`, défaut 1 m/s), sans écrêtage. L’encodeur conserve les
+coordonnées absolues `map`; une pose inconnue masque `MOVE` sans bloquer les
+autres décisions.
 
 ## Politique et exécution
 
-La politique possède des têtes pour l’action, la cible carton, la cible zone et
-la valeur `V(observation)`. En utilisation courante, elle choisit l’argmax.
-En collecte, elle échantillonne une action parmi les actions autorisées, puis
-une cible parmi les entités autorisées si nécessaire. La décision contient
-`behavior.sampled`, `behavior.log_prob` et `behavior.value` : la log-probabilité
-est celle du couple action/cible, pas seulement celle de l’action.
-L’inférence et l’évaluation des actions pour PPO partagent les mêmes masques.
-Une pose inconnue force `WAIT` sans inventer de probabilité de collecte.
+La politique possède une tête catégorielle, une tête gaussienne à quatre
+variables latentes pour le déplacement et une tête de valeur. Les variables
+`x,y` sont sigmoïdées dans les limites de la carte réduites par la marge robot
+(défaut 20 cm, configurable par `--robot-margin`) ; la sortie contient le couple
+`sin θ, cos θ`, normalisé puis décodé avec `atan2`. En collecte, les variables
+gaussiennes avant transformation sont journalisées pour PPO. Les checkpoints
+gardent l’étiquette v1 et sont chargés sans garde de version ; snapshots et
+épisodes sont versionnés séparément.
 
 | Action | Commande et conditions |
 |---|---|
-| `WAIT` | Ne commande rien. Seule possibilité pendant une opération active. |
-| `GO_TO_CARTON` | Cible unique avec pose d’approche ; publication `/goal_pose`. |
-| `GO_TO_ZONE` | Zone unique avec pose d’approche ; publication `/goal_pose`, même à vide. |
-| `CENTER` | Goal vide `/rock_centering` ; ROS choisit le tag ID 13 de plus faible profondeur optique. Pour changer de cible, déplacer le robot. |
-| `TAKE` | Service ventouse avec `true`, sans cible ni confirmation locale de contact ; la prise dépend du placement effectif. |
-| `RELEASE` | Service avec `false`, sans cible ni condition de charge ou de zone. |
+| `IDLE` | N’émet aucun ordre ; l’opération active continue. |
+| `CANCEL` | Remplace le but du déplacement par un court but d’arrêt ; seule une pose confirmée peut clore l’opération. |
+| `MOVE` | Publie une pose absolue `map` sur `/goal_pose`. Les cibles sans déplacement sont refusées car le contrôleur actuel divise par la longueur du trajet. |
+| `SUCTION_<n>_ON/OFF` | Active ou désactive une ventouse précise via son service `SetBool`. |
+| `TOGGLE_WRIST` | Bascule le poignet entre 0° et 90° selon l’angle mesuré. |
 
-La charge, l'accessibilité et la compatibilité géométrique ne masquent aucune
-action. Le réseau peut tenter une prise déjà chargé, un dépôt hors zone ou un
-centrage sans tag ; le résultat dépend de ROS et du simulateur. Les anciens
-paramètres de cible de `CENTER`, `TAKE` et `RELEASE` sont ignorés par l’exécuteur.
-Une navigation exige une cible observée avec pose d'approche ; l'exécuteur
-vérifie que cette pose est finie et dans les bornes de la table.
-
-Les commandes ROS restent séparées du shell qui source le workspace. Les
-processus sont asynchrones et sérialisés ; l’arrivée de navigation est vérifiée
-sur une pose fraîche. Timeout ou résultat ambigu donnent `unknown` et conservent
-le verrou. Le topic de navigation actuel ne permet pas d’annuler un goal distant :
-fermer le client local ne garantit pas l’arrêt de ce goal. Le runner ne lance
-aucune nouvelle décision à la réception d’un snapshot terminal.
+L’exécuteur utilise un publisher ROS `PoseStamped` et des clients `SetBool`
+sérialisés. Le topic `/goal_pose` ne fournit pas de résultat terminal : le
+déplacement n’est confirmé qu’après une pose fraîche à moins de 4 cm et 0,10 rad
+de la cible, et une vitesse mesurée nulle. Sinon le verrou reste `unknown`.
+`CANCEL` remplace le but par une cible à 2 cm, puis attend la même confirmation ;
+ce n’est pas une annulation ROS atomique. Les services ventouse et poignet ne
+sont pas annulables. Aucun nouvel ordre n’est envoyé avant une fin confirmée.
+Le pas d’observation/décision live par défaut est 10 Hz. Garder la même marge
+dans le runner et l’environnement afin que le préfiltrage des cibles soit cohérent.
 
 ## Déroulement d’un épisode RL
 
 | Étape | Traitement |
 |---|---|
 | 1. Reset | Le backend donne vérité et observations distinctes ; l’environnement crée un ID de partie et garde le reset en mémoire. |
-| 2. Observation | Chaque vue est canonisée dans le repère du robot ; les quatre coins de la table, les objets portés et les normales de tags suivent la transformation. Le temps total de l’épisode est ajouté. |
+| 2. Observation | Chaque vue reste dans le repère absolu `map`. Le temps total de l’épisode est ajouté. |
 | 3. Décision | Les deux politiques choisissent à partir de leur propre vue. Actions, probabilités et valeurs de collecte sont conservées. |
-| 4. Exécution | Les IDs choisis sont résolus dans les observations d’origine ; les poses d’approche envoyées au backend sont donc en `map`, même si la politique les a vues en ego. |
+| 4. Exécution | La cible absolue `MOVE` est validée dans les bornes de déplacement, puis envoyée au backend. |
 | 5. Retour | `advance` fournit nouvelle vérité, nouvelles observations et réponses d’exécution. Les points d’action sont calculés depuis ces résultats. |
 | 6. Fin | Signal explicite de fin ou limite de 90 secondes par défaut ; le gagnant est déterminé depuis les scores vrais ou un `winner_id` explicite. |
 | 7. Cibles | Les points terminaux sont ajoutés à la dernière transition. Les retours sont propagés en arrière et les cibles de victoire renseignées sur toutes les lignes. |

@@ -1,4 +1,4 @@
-"""NDJSON bridge between world snapshots, policy inference and ROS subprocesses."""
+"""NDJSON bridge between world snapshots, policy inference and typed ROS clients."""
 
 from __future__ import annotations
 
@@ -50,14 +50,15 @@ def _outcome(world: dict[str, Any], robot_id: str, opponent_id: str | None) -> t
 
 
 async def _run(args: argparse.Namespace) -> int:
-    policy = AgentPolicy(device=args.device)
+    policy = AgentPolicy(device=args.device, robot_margin_m=args.robot_margin,
+                         velocity_scale_m_s=args.velocity_scale)
     policy.load_or_create_checkpoint(args.model)
 
     executor = ActionExecutor(
-        ros_setup=args.ros_setup,
         command_timeout_s=args.command_timeout,
         navigation_timeout_s=args.navigation_timeout,
         pose_freshness_s=args.pose_freshness,
+        robot_margin_m=args.robot_margin,
     )
     last_sequence: int | None = None
     last_timestamp: float | None = None
@@ -140,14 +141,13 @@ def main() -> None:
         help="checkpoint to load or create (default: %(default)s)",
     )
     parser.add_argument("--device", default="cpu", help="torch device, default: cpu")
-    parser.add_argument(
-        "--ros-setup",
-        help="ROS workspace setup.bash sourced inside each command subprocess "
-        "(default: <repository>/install/setup.bash)",
-    )
     parser.add_argument("--command-timeout", type=float, default=35.0)
     parser.add_argument("--navigation-timeout", type=float, default=90.0)
     parser.add_argument("--pose-freshness", type=float, default=0.75)
+    parser.add_argument("--robot-margin", type=float, default=0.20,
+                        help="map-boundary clearance for the robot center, in meters")
+    parser.add_argument("--velocity-scale", type=float, default=1.0,
+                        help="linear velocity feature scale in meters per second")
     parser.add_argument("--records", type=Path, default=Path("runs/agent"), help="episode directory or JSONL file")
     parser.add_argument("--no-records", action="store_true")
     parser.add_argument("--opponent-id", help="opponent ID for final score comparison, otherwise inferred")

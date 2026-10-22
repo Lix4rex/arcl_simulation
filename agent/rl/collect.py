@@ -26,6 +26,10 @@ def main() -> None:
     parser.add_argument("--records", type=Path, default=Path("runs/episodes"))
     parser.add_argument("--episodes", type=int, default=10)
     parser.add_argument("--episode-seconds", type=float, default=90)
+    parser.add_argument("--robot-margin", type=float, default=0.20,
+                        help="map-boundary clearance for the robot center, in meters")
+    parser.add_argument("--velocity-scale", type=float, default=1.0,
+                        help="linear velocity feature scale in meters per second")
     parser.add_argument("--gamma", type=float, default=0.99)
     parser.add_argument("--record-only", action="store_true", help="collect without the unimplemented reward functions")
     parser.add_argument("--device", default="cpu")
@@ -40,15 +44,18 @@ def main() -> None:
         torch.manual_seed(args.seed)
         module, factory = args.backend.split(":", 1)
         backend = getattr(importlib.import_module(module), factory)()
-        policy = AgentPolicy(device=args.device)
+        policy = AgentPolicy(device=args.device, robot_margin_m=args.robot_margin,
+                             velocity_scale_m_s=args.velocity_scale)
         policy.load_or_create_checkpoint(args.model)
         opponent = policy
         if args.opponent_model is not None:
-            opponent = AgentPolicy(device=args.device)
+            opponent = AgentPolicy(device=args.device, robot_margin_m=args.robot_margin,
+                                   velocity_scale_m_s=args.velocity_scale)
             opponent.load_checkpoint(args.opponent_model)
         env = TwoRobotArenaEnv(
             backend.advance, controlled_robot_id=args.robot_id, opponent_robot_id=args.opponent_id,
             episode_seconds=args.episode_seconds, records_path=args.records, gamma=args.gamma,
+            robot_margin_m=args.robot_margin,
             action_rewarder=None if args.record_only else assign_action_points,
             terminal_rewarder=None if args.record_only else assign_winner_points,
         )
