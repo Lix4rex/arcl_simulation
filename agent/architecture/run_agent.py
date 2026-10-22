@@ -66,12 +66,17 @@ async def _run(args: argparse.Namespace) -> int:
     robot_id = "robot_omni"
     last_world: dict[str, Any] = {}
     complete = False
+    loop = asyncio.get_running_loop()
+    input_reader = asyncio.StreamReader()
+    input_protocol = asyncio.StreamReaderProtocol(input_reader)
+    input_transport, _ = await loop.connect_read_pipe(lambda: input_protocol, sys.stdin.buffer)
 
     try:
         while True:
-            line = await asyncio.to_thread(sys.stdin.readline)
-            if line == "":
+            raw_line = await input_reader.readline()
+            if raw_line == b"":
                 break
+            line = raw_line.decode("utf-8")
             if not line.strip():
                 continue
             try:
@@ -119,6 +124,7 @@ async def _run(args: argparse.Namespace) -> int:
             except (json.JSONDecodeError, KeyError, TypeError, ValueError) as error:
                 _emit({"error": str(error)})
     finally:
+        input_transport.close()
         await executor.close()
         if records is not None:
             winner, targets = _outcome(last_world, robot_id, args.opponent_id) if complete else (None, None)
