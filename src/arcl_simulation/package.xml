@@ -29,6 +29,8 @@
   <test_depend>ament_cmake_pytest</test_depend>
   <test_depend>ament_index_python</test_depend>
   <test_depend>rclpy</test_depend>
+  
+  <depend>tf2</depend>
   <depend>tf2_ros</depend>
 
   <export><build_type>ament_cmake</build_type></export>
