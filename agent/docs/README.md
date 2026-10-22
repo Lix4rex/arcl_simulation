@@ -1,129 +1,167 @@
-# Utiliser et entraîner l’agent
+# Guide rapide de l’agent
 
-Toutes les commandes se lancent depuis la racine du dépôt. Les contrats,
-le déroulement d’un épisode et les détails PPO sont dans [doc.md](doc.md).
+Toutes les commandes partent de la racine du dépôt.
 
-## Installation
+## Build et environnement ROS
+
+Dans un terminal, compiler le workspace :
 
 ```sh
-python3 -m venv --system-site-packages .venv
-source .venv/bin/activate
-python3 -m pip install -r agent/requirements.txt
+source /opt/ros/jazzy/setup.bash
+./build.sh
+source install/setup.bash
 ```
 
-Pour la simulation ROS/Gazebo : compiler le workspace avec `./build.sh`, puis
-sourcer `install/setup.bash`. Le backend RL et les fonctions de récompense
-restent à raccorder/définir ; leurs interfaces sont décrites dans `doc.md`.
-
-## Essayer un snapshot sans commander ROS
+Dans chaque nouveau terminal ROS, recharger l’environnement :
 
 ```sh
-python3 -c 'import json; print(json.dumps(json.load(open("agent/docs/example_world.json"))))' \
-  | python3 -m agent.architecture.run_agent --dry-run \
-      --model checkpoints/policy.pt --records runs/replay
+source /opt/ros/jazzy/setup.bash
+source install/setup.bash
 ```
 
-Le modèle est créé s’il manque. Les décisions et l’observation correspondante
-sont enregistrées dans `runs/replay/<episode_id>.jsonl`. Un fichier d’entrée
-sans fin de partie produit un épisode incomplet, exclu de l’entraînement.
+## Capter les actions du pupitre
 
-Pour rejouer un flux NDJSON déjà disponible :
+Terminal 1 — lancer la simulation :
 
 ```sh
-python3 -m agent.architecture.run_agent --dry-run \
-  --model checkpoints/policy.pt --records runs/replay < snapshots.jsonl
+source /opt/ros/jazzy/setup.bash
+source install/setup.bash
+ros2 launch arcl_simulation sim.launch.py rviz:=false
 ```
 
-## Utiliser l’agent avec ROS/Gazebo
+Terminal 2 — lancer le pupitre :
 
 ```sh
+source /opt/ros/jazzy/setup.bash
+source install/setup.bash
+python3 src/arcl_simulation/launch/move.launch.py
+```
+
+Cliquer sur **Enregistrer une démonstration**, effectuer les actions, puis
+arrêter l’enregistrement. Les exemples observation–cible sont ajoutés à
+`runs/targets.jsonl` sans remplacer les précédents. Les `IDLE` sont enregistrés
+à 10 Hz pendant une opération, pas pendant les attentes ni le centrage.
+
+## Capter les actions de la stratégie C++
+
+Terminal 1 — lancer la simulation :
+
+```sh
+source /opt/ros/jazzy/setup.bash
+source install/setup.bash
+ros2 launch arcl_simulation sim.launch.py rviz:=false
+```
+
+Terminal 2 — démarrer l’enregistreur et attendre `first observation received` :
+
+```sh
+source /opt/ros/jazzy/setup.bash
+source install/setup.bash
+python3 -m agent.architecture.record_strategy --carton-source gazebo_sim
+```
+
+Terminal 3 — démarrer la stratégie :
+
+```sh
+source /opt/ros/jazzy/setup.bash
+source install/setup.bash
+ros2 run arcl_simulation strategy
+```
+
+Les cibles sont ajoutées à `runs/targets.jsonl` à la fin de la stratégie.
+Les `IDLE` pendant les opérations sont gardés ; l’étape `IDLE` immédiate et le
+centrage sont ignorés. `gazebo_sim` utilise les poses Gazebo des cartons.
+
+## Entraîner l’agent
+
+Dans un terminal, entraîner sur le fichier commun de cibles :
+
+```sh
+python3 -m agent.architecture.train_targets runs/targets.jsonl \
+  --output checkpoints/policy.pt --epochs 20
+```
+Ajouter `--model checkpoints/policy.pt ` si on veut repartir d'un modèle déjà existant.
+
+Le découpage entraînement/validation se fait par session ou épisode ; il faut
+au moins deux groupes. Garde, déplace ou supprime `runs/targets.jsonl`
+manuellement selon que tu souhaites sauvegarder ou repartir de zéro.
+
+À l’entraînement, chaque action présente dans le jeu d’entraînement est
+rééquilibrée au nombre d’exemples de l’action la plus fréquente en réutilisant
+des exemples si nécessaire. Chaque exemple d’entraînement est ensuite reflété
+une fois de l’autre côté du terrain (`x′ = x_min + x_max − x`). Les angles
+deviennent `θ′ = π − θ` (sinus inchangé, cosinus inversé) et la vitesse
+angulaire change de signe. Les cibles `MOVE` sont transformées aussi ;
+validation et test restent inchangés.
+
+## Lancer une partie avec l’agent
+
+Terminal 1 — lancer la simulation :
+
+```sh
+source /opt/ros/jazzy/setup.bash
+source install/setup.bash
+ros2 launch arcl_simulation sim.launch.py rviz:=false
+```
+
+Terminal 2 — lancer l’observateur et l’agent :
+
+```sh
+source /opt/ros/jazzy/setup.bash
 source install/setup.bash
 python3 -m agent.architecture.world_observer --carton-source gazebo_sim \
   | python3 -m agent.architecture.run_agent \
       --model checkpoints/policy.pt --records runs/live
 ```
 
-Cette commande exécute réellement les actions ROS. `--ros-setup chemin/setup.bash`
-permet de choisir un autre overlay. Une pose absente impose l'attente ;
-une charge inconnue ne bloque pas les actions.
-L'observateur lance son propre bridge Gazebo vers ROS pour
-`/robot_omni/ventouse/etat` et renseigne `robot.suction_state`.
-Le plugin publie uniquement aux changements d'état : avant le premier message,
-la valeur reste `None`, puis la dernière valeur est conservée. Si le bridge
-s'arrête ou si le message est invalide, elle redevient `None`. Ce flux ne fournit
-ni heartbeat ni détection d'un redémarrage du simulateur ; l'âge du dernier
-événement figure dans `sources.suction.age_s`.
-La charge, l'objet tenu et les contacts restent `None`.
-Les zones et obstacles fixes se renseignent dans `agent/architecture/arena_map.json`.
+`--sample-actions` active l’échantillonnage au lieu du choix déterministe. Les
+journaux `runs/live` ne sont pas des cibles self-play : ils ne contiennent pas
+les récompenses par action.
 
-Le runner s’arrête sur le signal de fin de match ou un temps restant nul.
-Les journaux live conservent les décisions et le résultat connu, mais ne sont
-pas des données PPO récompensées. Pour l’entraînement RL, utiliser la collecte
-ci-dessous. `--sample-actions` active l’échantillonnage dans le runner si nécessaire.
+## Self-play et préparation des cibles
 
-## Collecter des épisodes RL
+Il faut un backend à deux robots fournissant `reset()` et `advance()`, et
+implémenter les récompenses dans `agent/rl/environment.py`. Aucun backend Gazebo
+prêt à l’emploi n’est encore fourni. Une fois `mon_backend:create_backend`
+configuré :
 
-Remplacer `mon_backend:create_backend` par la fabrique de votre adaptateur
-simulateur. Elle doit fournir `reset()` et `advance()` selon `doc.md`.
-
-Pour vérifier le branchement avant de définir les fonctions de points :
+Terminal 1 — collecter les parties et leurs actions :
 
 ```sh
-python3 -m agent.rl.collect --backend mon_backend:create_backend \
-  --robot-id bleu --opponent-id rouge --episodes 10 --record-only \
-  --model checkpoints/policy.pt --records runs/diagnostic
-```
-
-Ces fichiers sont explicitement marqués sans récompenses et ne sont pas utilisés
-pour apprendre. Une fois `assign_action_points` et `assign_winner_points`
-définies dans `agent/rl/environment.py`, collecter les données d’entraînement :
-
-```sh
+source /opt/ros/jazzy/setup.bash
+source install/setup.bash
 python3 -m agent.rl.collect --backend mon_backend:create_backend \
   --robot-id bleu --opponent-id rouge --episodes 20 \
-  --model checkpoints/policy.pt --records runs/batch-001
+  --model checkpoints/policy.pt --records runs/selfplay
 ```
 
-Les deux politiques échantillonnent actions et cibles. Par défaut, elles utilisent
-le même modèle ; `--opponent-model chemin.pt` choisit une autre politique adverse.
-Le modèle de collecte doit être conservé pour l’étape suivante.
+Sans `--opponent-model`, les deux robots utilisent le même modèle. Après la fin
+de la collecte, préparer les cibles à partir des épisodes complets récompensés :
 
-## Entraîner puis charger le modèle retenu
-
-Au moins deux épisodes complets et récompensés sont nécessaires pour la
-séparation automatique train/validation :
+Terminal 2 — convertir les journaux en cibles :
 
 ```sh
-python3 -m agent.architecture.train_policy runs/batch-001 \
-  --model checkpoints/policy.pt --output checkpoints/policy-next.pt \
-  --validation-fraction 0.2 --epochs 4 --seed 7
+source /opt/ros/jazzy/setup.bash
+source install/setup.bash
+python3 -m agent.rl.prepare_targets runs/selfplay \
+  --output runs/targets.jsonl --target-step-size 0.1
 ```
 
-Le meilleur checkpoint selon la validation est conservé, ainsi que
-`checkpoints/policy-next.metrics.json` avec les partitions et métriques.
-Les épisodes incomplets, sans récompenses ou sans décisions échantillonnées
-sont exclus. Pour apprendre uniquement d’un robot, ajouter `--robot-id bleu`.
-
-Avec des partitions préparées séparément :
+Terminal 3 — entraîner sur toutes les cibles :
 
 ```sh
-python3 -m agent.architecture.train_policy runs/train \
-  --validation-data runs/validation --test-data runs/test \
-  --model checkpoints/policy.pt --output checkpoints/policy-next.pt
+python3 -m agent.architecture.train_targets runs/targets.jsonl \
+  --model checkpoints/policy.pt \
+  --output checkpoints/policy-next.pt --epochs 20
 ```
 
-Le jeu de test est facultatif et évalué uniquement après sélection du checkpoint.
-Réutiliser `checkpoints/policy-next.pt` avec `run_agent --model` pour l’inférence,
-ou avec `collect --model` pour une nouvelle collecte. Pour un nouveau cycle PPO,
-collecter un nouveau lot avec ce modèle plutôt que réentraîner continuellement
-sur les mêmes anciennes parties. Les anciennes lignes supervisées
-`{world, decision}` ne sont pas le format de cet entraînement RL.
+La préparation des cibles est une commande séparée après la collecte ;
+`--record-only` ne fournit pas les récompenses nécessaires.
 
-## Vérifier le flux sans ROS
+## Tests
+
+Dans un terminal à la racine du dépôt :
 
 ```sh
 python3 -m unittest discover -s agent/tests -v
 ```
-
-Les tests utilisent un backend fictif et des récompenses locales au test ; ils
-ne modifient pas les fonctions de points de production et ne pilotent aucun robot.

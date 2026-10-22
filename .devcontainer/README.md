@@ -51,7 +51,10 @@ ros2 launch arcl_simulation sim.launch.py
 `./setup.sh` complète les dépendances déclarées dans les `package.xml` via rosdep.
 Il est recommandé dans un conteneur neuf (réseau et sudo requis), mais peut être
 omis si toutes les dépendances sont déjà installées. Les deux Dockerfiles
-installent `tf_transformations` et `transforms3d`, utilisés par ArUco.
+installent `robot_localization`, nécessaire à la fusion de l’odométrie, ainsi que
+`tf_transformations` et `transforms3d`, utilisés par ArUco. Après toute
+modification d’un Dockerfile, reconstruire le conteneur avec **Dev Containers:
+Rebuild Container** pour appliquer l’installation.
 Le `if` du script ignore uniquement l’import optionnel de `src/ros2.repos` quand
 ce fichier est absent ; les erreurs d’installation arrêtent toujours le script.
 La compilation

@@ -11,6 +11,8 @@ from typing import Any
 
 import numpy as np
 
+RECORD_SCHEMA_VERSION = 2
+
 
 def _json_default(value: Any) -> Any:
     if isinstance(value, np.ndarray):
@@ -36,7 +38,10 @@ class EpisodeRecords:
     def add(self, row: dict[str, Any]) -> None:
         if self.finished:
             raise RuntimeError("episode records are already finalized")
-        self.rows.append(copy.deepcopy({**row, "episode_id": self.episode_id}))
+        self.rows.append(copy.deepcopy({
+            **row, "episode_id": self.episode_id,
+            "record_schema_version": RECORD_SCHEMA_VERSION,
+        }))
 
     def finish(self, *, complete: bool, winner_id: str | None,
                winner_targets: dict[str, float] | None,
@@ -47,13 +52,6 @@ class EpisodeRecords:
         ready = complete and rewards_complete and winner_targets is not None and bool(transitions) and all(
             isinstance(row.get("reward"), dict) for row in transitions
         )
-        returns = {robot_id: 0.0 for robot_id in self.robot_ids}
-        for row in reversed(transitions):
-            row["return_targets"] = None
-            if ready:
-                returns = {robot_id: float(row["reward"][robot_id]) + self.gamma * returns[robot_id]
-                           for robot_id in self.robot_ids}
-                row["return_targets"] = dict(returns)
         self.add({"kind": "episode_end", "reason": reason})
         for row in self.rows:
             row.update(complete=complete, winner_id=winner_id,

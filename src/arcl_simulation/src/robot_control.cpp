@@ -476,6 +476,18 @@ class RobotControl : public rclcpp::Node{
 
                 rclcpp::TimerBase::SharedPtr control_timer_;
                 void trajectory_control_loop(){
+                        if (active_goal_pose_ && active_goal_pose_->is_canceling()) {
+                                phase_finale = false;
+                                trajectoire_active = false;
+                                goal_active = false;
+                                send_robot_speed(0.0, 0.0, 0.0);
+                                auto result = std::make_shared<robot_msgs::action::GoToPose::Result>();
+                                result->success = false;
+                                result->message = "Déplacement annulé";
+                                active_goal_pose_->canceled(result);
+                                active_goal_pose_.reset();
+                                return;
+                        }
                         if (!position_received || !goal_active) return;
 
                         // Phase finale : on ne suit plus le temps, on asservit directement sur l'objectif
@@ -573,7 +585,7 @@ class RobotControl : public rclcpp::Node{
 
                         if (maintenant - t_debut_phase_finale > timeout_phase_finale){
                                 RCLCPP_WARN(this->get_logger(), "Timeout phase finale : arrêt avec une erreur de %.1f mm, %.2f°", erreur_position*1000, etheta*180/M_PI);
-                                terminer_objectif();
+                                terminer_objectif(false);
                                 return;
                         }
 
@@ -605,16 +617,17 @@ class RobotControl : public rclcpp::Node{
                         send_robot_speed(vx_table, vy_table, omega);
                 }
 
-                void terminer_objectif(){
+                void terminer_objectif(bool success = true){
                         phase_finale = false;
                         trajectoire_active = false;
                         goal_active = false;
                         send_robot_speed(0.0, 0.0, 0.0);
 
                         auto result = std::make_shared<robot_msgs::action::GoToPose::Result>();
-                        result->message="Fin de la trajectoire";
-                        result->success=true;
-                        active_goal_pose_->succeed(result);
+                        result->message = success ? "Objectif atteint" : "Timeout phase finale";
+                        result->success = success;
+                        if (success) active_goal_pose_->succeed(result);
+                        else active_goal_pose_->abort(result);
                         active_goal_pose_.reset();
                 }
 

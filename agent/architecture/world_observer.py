@@ -6,7 +6,6 @@ import argparse
 import copy
 import json
 import math
-import subprocess
 import sys
 import time
 from pathlib import Path
@@ -27,6 +26,9 @@ DEFAULT_FRESHNESS = {
     "obstacles": 0.75,
     "aruco": 0.75,
     "cartons": 1.0,
+    "velocity": 0.25,
+    "wrist": 1.0,
+    "suction": 2.0,
 }
 
 
@@ -110,6 +112,17 @@ def _rpy_matrix(rpy: list[float] | tuple[float, float, float]) -> np.ndarray:
     ], dtype=np.float64)
 
 
+def _velocity_to_map(linear_x: float, linear_y: float, angular_z: float,
+                     robot_yaw: float) -> dict[str, float]:
+    values = (float(linear_x), float(linear_y), float(angular_z), float(robot_yaw))
+    if not all(math.isfinite(value) for value in values):
+        raise ValueError("odometry velocity and robot heading must be finite")
+    vx, vy, omega, yaw = values
+    cosine, sine = math.cos(yaw), math.sin(yaw)
+    return {"x": cosine * vx - sine * vy, "y": sine * vx + cosine * vy,
+            "yaw": omega}
+
+
 class SnapshotAssembler:
     """Pure snapshot builder; ROS callbacks only translate messages to dicts."""
 
@@ -132,14 +145,23 @@ class SnapshotAssembler:
         self.pose: dict[str, Any] | None = None
         self.obstacles: dict[str, Any] | None = None
         self.markers: dict[str, Any] | None = None
-        self.suction: dict[str, Any] | None = None
+        self.suctions: dict[str, dict[str, Any]] = {}
+        self.velocity: dict[str, Any] | None = None
+        self.wrist: dict[str, Any] | None = None
 
-    def update_suction(self, value: str | None, *, received_at: float) -> None:
+    def update_actuator_suction(self, index: int, value: str | None, *, received_at: float) -> None:
         state = SUCTION_STATES.get(value)
-        self.suction = {
+        self.suctions[str(index)] = {
             "value": state, "received_at": float(received_at),
-            "status": "known" if state is not None else "unknown",
+            "status": "fresh" if state is not None else "unknown",
         }
+
+    def update_velocity(self, value: dict[str, Any] | None, *, received_at: float,
+                        status: str = "fresh") -> None:
+        self.velocity = {"value": copy.deepcopy(value), "received_at": float(received_at), "status": status}
+
+    def update_wrist(self, value: float | None, *, received_at: float, status: str = "fresh") -> None:
+        self.wrist = {"value": value, "received_at": float(received_at), "status": status}
 
     def update_pose(
         self,
@@ -193,6 +215,8 @@ class SnapshotAssembler:
         clock_age_s: float | None = None,
     ) -> dict[str, Any]:
         pose_meta = _source_status(self.pose, now, self.freshness["robot_pose"])
+        velocity_meta = _source_status(self.velocity, now, self.freshness["velocity"])
+        wrist_meta = _source_status(self.wrist, now, self.freshness["wrist"])
         obstacle_meta = _source_status(self.obstacles, now, self.freshness["obstacles"])
         marker_meta = _source_status(self.markers, now, self.freshness["aruco"])
         if self.markers is not None:
@@ -235,6 +259,12 @@ class SnapshotAssembler:
         )
         aruco_detections = []
         robot_pose = copy.deepcopy(self.pose.get("value")) if pose_meta["fresh"] and self.pose else None
+        velocity = copy.deepcopy(self.velocity.get("value")) if velocity_meta["fresh"] and self.velocity else None
+        wrist_angle = self.wrist.get("value") if wrist_meta["fresh"] and self.wrist else None
+        suction_states = {
+            index: (sample.get("value") if _source_status(sample, now, self.freshness["suction"])["fresh"] else None)
+            for index, sample in self.suctions.items()
+        }
         obstacles = []
         if obstacle_meta["fresh"] and self.obstacles:
             for index, item in enumerate(self.obstacles["value"]):
@@ -267,14 +297,19 @@ class SnapshotAssembler:
             "id": self.robot_id,
             "pose": robot_pose,
             "pose_age_s": pose_meta["age_s"],
-            "suction_state": None if self.suction is None else self.suction["value"],
+            "velocity": velocity,
+            "wrist_angle_rad": wrist_angle,
+            "suction_states": suction_states,
+            "actuator_state_ages_s": {
+                index: _source_age(sample, now) for index, sample in self.suctions.items()
+            },
             "payload_state": None,
             "held_object": None,
             "contact_confirmed": None,
             "contact_target_id": None,
         }
         return {
-            "schema_version": 1,
+            "schema_version": 2,
             "sequence": int(sequence),
             "timestamp": float(timestamp),
             "game_time_s": float(timestamp),
@@ -285,6 +320,8 @@ class SnapshotAssembler:
             "aruco_detections": aruco_detections,
             "obstacles": obstacles,
             "other_robots": [],
+            "active_operation": None,
+            "last_action_result": None,
             "zones": copy.deepcopy(self.map_config.get("zones", [])),
             "mission": {
                 "remaining_s": None,
@@ -294,17 +331,23 @@ class SnapshotAssembler:
             },
             "sources": {
                 "robot_pose": {"topic": "/pose_estimation", **pose_meta},
+                "velocity": {"topic": "/odometry/filtered", **velocity_meta},
+                "wrist": {"topic": "/joint_states", **wrist_meta},
                 "obstacles": {"topic": "/obstacles_scan", **obstacle_meta},
                 "aruco": {"topic": "/aruco_markers", **marker_meta},
                 "cartons": carton_meta,
                 "map": {"provider": "config", "status": "fresh", "age_s": 0.0},
                 "clock": {"topic": "/clock", "age_s": clock_age_s},
-                "suction": {
-                    "topic": "/robot_omni/ventouse/etat",
-                    "provider": "gazebo_sim",
-                    "status": "unknown" if self.suction is None else self.suction["status"],
-                    "age_s": _source_age(self.suction, now),
-                    "update_mode": "on_change",
+                **{
+                    f"suction_{index}": {
+                        "topic": f"/robot_omni/ventouse_{index}/etat",
+                        "status": "unknown" if str(index) not in self.suctions else
+                            _source_status(self.suctions[str(index)], now, self.freshness["suction"])["status"],
+                        "fresh": str(index) in self.suctions and
+                            _source_status(self.suctions[str(index)], now, self.freshness["suction"])["fresh"],
+                        "age_s": None if str(index) not in self.suctions else
+                            _source_age(self.suctions[str(index)], now),
+                    } for index in range(1, 4)
                 },
             },
         }
@@ -520,13 +563,14 @@ def _run_ros(
 ) -> None:
     try:
         import rclpy
-        from ament_index_python.packages import get_package_prefix
         from geometry_msgs.msg import PoseStamped
+        from nav_msgs.msg import Odometry
         from rosgraph_msgs.msg import Clock
         from rclpy.node import Node
         from rclpy.qos import QoSProfile, ReliabilityPolicy
         from robot_msgs.msg import ObstacleArray
         from ros2_aruco_interfaces.msg import ArucoMarkers
+        from sensor_msgs.msg import JointState
         from std_msgs.msg import String
     except ImportError as error:
         raise RuntimeError(
@@ -549,18 +593,55 @@ def _run_ros(
             self.clock_received_at: float | None = None
             self.last_timestamp = 0.0
             self.logged_source_error: str | None = None
-            self.suction_bridge: subprocess.Popen | None = None
             clock_qos = QoSProfile(depth=1)
             clock_qos.reliability = ReliabilityPolicy.BEST_EFFORT
             self.create_subscription(PoseStamped, "/pose_estimation", self.on_pose, 10)
+            self.create_subscription(Odometry, "/odometry/filtered", self.on_velocity, 10)
+            self.create_subscription(JointState, "/joint_states", self.on_joint_states, 10)
             self.create_subscription(ObstacleArray, "/obstacles_scan", self.on_obstacles, 10)
             self.create_subscription(ArucoMarkers, "/aruco_markers", self.on_markers, 10)
             self.create_subscription(Clock, "/clock", self.on_clock, clock_qos)
-            self.create_subscription(String, "/robot_omni/ventouse/etat", self.on_suction, 10)
+            for index in range(1, 4):
+                self.create_subscription(
+                    String, f"/robot_omni/ventouse_{index}/etat",
+                    lambda message, actuator=index: self.on_actuator_suction(actuator, message), 10,
+                )
             self.create_timer(1.0 / args.publish_hz, self.on_timer)
 
-        def on_suction(self, message: Any) -> None:
-            self.assembler.update_suction(message.data, received_at=time.monotonic())
+        def on_actuator_suction(self, index: int, message: Any) -> None:
+            self.assembler.update_actuator_suction(index, message.data, received_at=time.monotonic())
+
+        def on_velocity(self, message: Any) -> None:
+            received = time.monotonic()
+            twist = message.twist.twist
+            pose_sample = self.assembler.pose
+            pose = pose_sample.get("value") if pose_sample else None
+            pose_age = _source_age(pose_sample, received)
+            if (pose is None or pose_sample.get("status") != "fresh" or pose_age is None
+                    or pose_age > self.assembler.freshness["robot_pose"]):
+                self.assembler.update_velocity(None, received_at=received, status="unknown")
+                return
+            try:
+                values = _velocity_to_map(twist.linear.x, twist.linear.y,
+                                          twist.angular.z, pose["yaw"])
+            except (KeyError, TypeError, ValueError):
+                self.assembler.update_velocity(None, received_at=received, status="invalid")
+                return
+            self.assembler.update_velocity(values, received_at=received)
+
+        def on_joint_states(self, message: Any) -> None:
+            received = time.monotonic()
+            try:
+                index = next(i for i, name in enumerate(message.name)
+                             if name.split("::")[-1] == "poignet_joint")
+                angle = float(message.position[index])
+            except (ValueError, IndexError, TypeError):
+                self.assembler.update_wrist(None, received_at=received, status="invalid")
+                return
+            if not math.isfinite(angle):
+                self.assembler.update_wrist(None, received_at=received, status="invalid")
+                return
+            self.assembler.update_wrist(angle, received_at=received)
 
         def on_clock(self, message: Any) -> None:
             self.sim_time = _seconds(message.clock)
@@ -654,10 +735,6 @@ def _run_ros(
 
         def on_timer(self) -> None:
             now = time.monotonic()
-            if self.suction_bridge is not None and self.suction_bridge.poll() is not None:
-                self.assembler.update_suction(None, received_at=now)
-                self.get_logger().warning("suction bridge stopped; suction_state is unknown")
-                self.suction_bridge = None
             timestamp = self.sim_time if self.sim_time is not None else now - self.started_at
             timestamp = max(self.last_timestamp, float(timestamp))
             self.last_timestamp = timestamp
@@ -678,24 +755,8 @@ def _run_ros(
     rclpy.init()
     node = WorldObserverNode()
     try:
-        try:
-            # Keep bridge diagnostics off stdout, which carries NDJSON snapshots.
-            node.suction_bridge = subprocess.Popen([
-                str(Path(get_package_prefix("ros_gz_bridge")) / "lib/ros_gz_bridge/parameter_bridge"),
-                "/robot_omni/ventouse/etat@std_msgs/msg/String[gz.msgs.StringMsg",
-                "--ros-args", "-r", "__node:=agent_suction_bridge",
-            ], stdin=subprocess.DEVNULL, stdout=sys.stderr, stderr=sys.stderr)
-        except (OSError, LookupError) as error:
-            node.get_logger().warning(f"suction bridge unavailable: {error}")
         rclpy.spin(node)
     finally:
-        if node.suction_bridge is not None:
-            node.suction_bridge.terminate()
-            try:
-                node.suction_bridge.wait(timeout=2.0)
-            except subprocess.TimeoutExpired:
-                node.suction_bridge.kill()
-                node.suction_bridge.wait(timeout=2.0)
         node.destroy_node()
         rclpy.shutdown()
 

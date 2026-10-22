@@ -11,4 +11,7 @@ core
 
 __pycache__
 
+# Generated training datasets, run logs and model checkpoints
+/runs
+/checkpoints
 test_cam

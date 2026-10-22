@@ -1,14 +1,17 @@
 #include <chrono>
 #include <cmath>
 #include <functional>
+#include <iomanip>
 #include <list>
 #include <map>
 #include <memory>
+#include <sstream>
 #include <string>
 #include <vector>
 
 #include "rclcpp/rclcpp.hpp"
 #include "rclcpp_action/rclcpp_action.hpp"
+#include "std_msgs/msg/string.hpp"
 #include "std_srvs/srv/set_bool.hpp"
 #include "geometry_msgs/msg/transform_stamped.hpp"
 #include "tf2/exceptions.h"
@@ -71,6 +74,8 @@ class Strategy : public rclcpp::Node{
                         "/robot_omni/ventouse_" + std::to_string(etage) + "/set");
                 }
                 poignet_client = this->create_client<SetBool>(SERVICE_POIGNET);
+                events_publisher = this->create_publisher<std_msgs::msg::String>(
+                    "/agent/strategy_events", 10);
 
                 tf_buffer = std::make_unique<tf2_ros::Buffer>(this->get_clock());
                 tf_listener = std::make_shared<tf2_ros::TransformListener>(*tf_buffer);
@@ -236,6 +241,7 @@ class Strategy : public rclcpp::Node{
             rclcpp_action::Client<RockCentering>::SharedPtr centrage_client_ptr;
             std::map<int, rclcpp::Client<SetBool>::SharedPtr> ventouse_clients;
             rclcpp::Client<SetBool>::SharedPtr poignet_client;
+            rclcpp::Publisher<std_msgs::msg::String>::SharedPtr events_publisher;
 
             std::unique_ptr<tf2_ros::Buffer> tf_buffer;
             std::shared_ptr<tf2_ros::TransformListener> tf_listener;
@@ -295,6 +301,7 @@ class Strategy : public rclcpp::Node{
                 termine = true;
                 ++etape;
                 annuler_watchdog();
+                publier_fin(erreur ? "failed" : "succeeded");
                 if (erreur) RCLCPP_ERROR(this->get_logger(), "%s", raison.c_str());
                 else RCLCPP_INFO(this->get_logger(), "%s", raison.c_str());
                 // petit délai pour laisser partir une éventuelle annulation de but
@@ -333,7 +340,10 @@ class Strategy : public rclcpp::Node{
                         break;
                     case State::ROTATION_VENTOUSE:
                         RCLCPP_INFO(this->get_logger(), "Je rotate la ventouse à %s", action.direction ? "90°" : "0°");
-                        appeler_service(poignet_client, action.direction != 0, "poignet");
+                        appeler_service(
+                            poignet_client, action.direction != 0, "poignet", "wrist",
+                            "TOGGLE_WRIST", "{\"target_angle_rad\":" +
+                                std::to_string(action.direction ? M_PI / 2.0 : 0.0) + "}");
                         break;
                     case State::VENTOUSE: {
                         auto it = ventouse_clients.find(action.index);
@@ -344,7 +354,13 @@ class Strategy : public rclcpp::Node{
                         }
                         const std::string nom = action.index == 0 ? "ventouses (toutes)" : "ventouse " + std::to_string(action.index);
                         RCLCPP_INFO(this->get_logger(), "Je %s avec %s", action.direction ? "prends" : "lâche", nom.c_str());
-                        appeler_service(it->second, action.direction != 0, nom);
+                        const std::string groupe = action.index == 0 ? "\"all\"" : std::to_string(action.index);
+                        appeler_service(
+                            it->second, action.direction != 0, nom, "suction",
+                            action.index == 0 ? (action.direction ? "SUCTION_ALL_ON" : "SUCTION_ALL_OFF") :
+                                "SUCTION_" + std::to_string(action.index) + (action.direction ? "_ON" : "_OFF"),
+                            "{\"group\":" + groupe + ",\"enabled\":" +
+                                (action.direction ? "true" : "false") + "}");
                         break;
                     }
                     default:
@@ -358,6 +374,34 @@ class Strategy : public rclcpp::Node{
                 essais = 0;
                 actions.pop_front();
                 tick();
+            }
+
+            void publier_debut(uint64_t id, const std::string & commande,
+                               const std::string & parametres, const std::string & type,
+                               bool annulable){
+                std::ostringstream json;
+                json << "{\"event\":\"start\",\"id\":" << id
+                     << ",\"command\":\"" << commande
+                     << "\",\"parameters\":" << parametres
+                     << ",\"operation_type\":\"" << type
+                     << "\",\"cancelable\":" << (annulable ? "true" : "false")
+                     << "}";
+                std_msgs::msg::String message;
+                message.data = json.str();
+                events_publisher->publish(message);
+            }
+
+            void publier_resultat(uint64_t id, const std::string & status){
+                std_msgs::msg::String message;
+                message.data = "{\"event\":\"result\",\"id\":" +
+                    std::to_string(id) + ",\"status\":\"" + status + "\"}";
+                events_publisher->publish(message);
+            }
+
+            void publier_fin(const std::string & status){
+                std_msgs::msg::String message;
+                message.data = "{\"event\":\"finish\",\"status\":\"" + status + "\"}";
+                events_publisher->publish(message);
             }
 
             void echec(const std::string & raison){
@@ -410,6 +454,10 @@ class Strategy : public rclcpp::Node{
                 goal.theta = theta * M_PI / 180.0;     // la liste est en degrés, go_to_pose attend des radians
 
                 const auto id = etape;
+                std::ostringstream parameters;
+                parameters << std::setprecision(17) << "{\"x\":" << goal.x
+                           << ",\"y\":" << goal.y << ",\"theta\":" << goal.theta << "}";
+                publier_debut(id, "move", parameters.str(), "MOVE", true);
                 auto options = rclcpp_action::Client<GoToPose>::SendGoalOptions();
                 options.goal_response_callback = [this, id](GoalHandleGoToPose::SharedPtr gh){
                     move_to_goal_response_callback(id, gh);
@@ -423,10 +471,11 @@ class Strategy : public rclcpp::Node{
                 };
                 move_to_client_ptr->async_send_goal(goal, options);
 
-                lancer_watchdog(T_ALLER, [this](){
+                lancer_watchdog(T_ALLER, [this, id](){
                     if (goal_handle) move_to_client_ptr->async_cancel_goal(goal_handle);
                     else move_to_client_ptr->async_cancel_all_goals();
                     goal_handle.reset();
+                    publier_resultat(id, "failed");
                     echec("go_to_pose pas fini à temps : annulé");
                 });
             }
@@ -438,6 +487,7 @@ class Strategy : public rclcpp::Node{
                 }
                 if (!gh){
                     RCLCPP_ERROR(this->get_logger(), "Goal was rejected by server");
+                    publier_resultat(id, "rejected");
                     echec("go_to_pose refusé par le serveur");
                     return;
                 }
@@ -456,18 +506,22 @@ class Strategy : public rclcpp::Node{
                 switch (result.code){
                     case rclcpp_action::ResultCode::SUCCEEDED:
                         RCLCPP_INFO(this->get_logger(), "Arrivé");
+                        publier_resultat(id, "succeeded");
                         suivante();
                         return;
                     case rclcpp_action::ResultCode::ABORTED:
                         RCLCPP_ERROR(this->get_logger(), "Goal was aborted");
+                        publier_resultat(id, "failed");
                         echec("go_to_pose abandonné");
                         return;
                     case rclcpp_action::ResultCode::CANCELED:
                         RCLCPP_ERROR(this->get_logger(), "Goal was canceled");
+                        publier_resultat(id, "canceled");
                         echec("go_to_pose annulé");
                         return;
                     default:
                         RCLCPP_ERROR(this->get_logger(), "Unknown result code");
+                        publier_resultat(id, "unknown");
                         echec("go_to_pose : code de résultat inconnu");
                         return;
                 }
@@ -478,6 +532,7 @@ class Strategy : public rclcpp::Node{
 
             void send_centrage(){
                 const auto id = etape;
+                publier_debut(id, "rock_centering", "{}", "CENTRAGE", false);
                 auto options = rclcpp_action::Client<RockCentering>::SendGoalOptions();
                 options.goal_response_callback = [this, id](GoalHandleRockCentering::SharedPtr gh){
                     centrage_goal_response_callback(id, gh);
@@ -491,11 +546,11 @@ class Strategy : public rclcpp::Node{
                 };
                 centrage_client_ptr->async_send_goal(RockCentering::Goal(), options);   // goal vide : simple déclenchement
 
-                lancer_watchdog(T_CENTRAGE, [this](){
+                lancer_watchdog(T_CENTRAGE, [this, id](){
                     if (centrage_handle) centrage_client_ptr->async_cancel_goal(centrage_handle);
                     else centrage_client_ptr->async_cancel_all_goals();
                     centrage_handle.reset();
-                    fin_centrage(false, "pas fini à temps : annulé");
+                    fin_centrage(id, false, "failed", "pas fini à temps : annulé");
                 });
             }
 
@@ -505,7 +560,7 @@ class Strategy : public rclcpp::Node{
                     return;
                 }
                 if (!gh){
-                    fin_centrage(false, "refusé par le serveur");
+                    fin_centrage(id, false, "rejected", "refusé par le serveur");
                     return;
                 }
                 centrage_handle = gh;
@@ -523,22 +578,28 @@ class Strategy : public rclcpp::Node{
                 centrage_handle.reset();
                 switch (result.code){
                     case rclcpp_action::ResultCode::SUCCEEDED:
-                        fin_centrage(result.result->success, result.result->message);
+                        fin_centrage(id, result.result && result.result->success,
+                            result.result && result.result->success ? "succeeded" : "failed",
+                            result.result ? result.result->message : "résultat absent");
                         return;
                     case rclcpp_action::ResultCode::ABORTED:
-                        fin_centrage(false, "abandonné" + (result.result ? " — " + result.result->message : std::string()));
+                        fin_centrage(id, false, "failed", "abandonné" +
+                            (result.result ? " — " + result.result->message : std::string()));
                         return;
                     case rclcpp_action::ResultCode::CANCELED:
-                        fin_centrage(false, "annulé");
+                        fin_centrage(id, false, "canceled", "annulé");
                         return;
                     default:
-                        fin_centrage(false, "code de résultat inconnu");
+                        fin_centrage(id, false, "unknown", "code de résultat inconnu");
                         return;
                 }
             }
 
             // Comme dans strategie_camelot.py : un centrage raté n'est pas bloquant, on prend la pose de la carte.
-            void fin_centrage(bool ok, const std::string & message){
+            void fin_centrage(uint64_t id, bool ok, const std::string & status,
+                              const std::string & message){
+                if (id != etape) return;
+                publier_resultat(id, status);
                 const Action centrage = actions.front();
                 actions.pop_front();
                 essais = 0;
@@ -596,21 +657,26 @@ class Strategy : public rclcpp::Node{
 
             // ------------------------------------------------------------ services (std_srvs/SetBool)
 
-            void appeler_service(rclcpp::Client<SetBool>::SharedPtr client, bool valeur, const std::string & nom){
+            void appeler_service(rclcpp::Client<SetBool>::SharedPtr client, bool valeur,
+                                 const std::string & nom, const std::string & commande,
+                                 const std::string & type, const std::string & parametres){
+                const auto id = etape;
+                publier_debut(id, commande, parametres, type, false);
                 if (!client->service_is_ready()){
+                    publier_resultat(id, "rejected");
                     echec("service " + std::string(client->get_service_name()) + " indisponible");
                     return;
                 }
                 auto requete = std::make_shared<SetBool::Request>();
                 requete->data = valeur;
 
-                const auto id = etape;
                 auto futur = client->async_send_request(requete,
                     [this, id, nom](rclcpp::Client<SetBool>::SharedFuture f){ service_callback(id, nom, f); });
 
                 const auto request_id = futur.request_id;
-                lancer_watchdog(T_SERVICE, [this, client, request_id, nom](){
+                lancer_watchdog(T_SERVICE, [this, id, client, request_id, nom](){
                     client->remove_pending_request(request_id);
+                    publier_resultat(id, "failed");
                     echec(nom + " : pas de réponse à temps");
                 });
             }
@@ -620,8 +686,10 @@ class Strategy : public rclcpp::Node{
                 auto reponse = futur.get();
                 if (reponse->success){
                     RCLCPP_INFO(this->get_logger(), "%s : %s", nom.c_str(), reponse->message.c_str());
+                    publier_resultat(id, "succeeded");
                     suivante();
                 } else {
+                    publier_resultat(id, "failed");
                     echec(nom + " : " + reponse->message);
                 }
             }
