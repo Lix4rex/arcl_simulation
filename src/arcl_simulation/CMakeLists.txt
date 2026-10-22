@@ -38,7 +38,7 @@ add_executable(rock_centering src/rock_centering.cpp)
 ament_target_dependencies(rock_centering rclcpp ros2_aruco_interfaces robot_msgs rclcpp_action)
 
 add_executable(strategy src/strategy.cpp)
-ament_target_dependencies(strategy rclcpp robot_msgs rclcpp_action std_srvs tf2_ros tf2 geometry_msgs)
+ament_target_dependencies(strategy rclcpp robot_msgs rclcpp_action std_msgs std_srvs tf2_ros tf2 geometry_msgs)
 
 add_executable(ventouse_service src/ventouse_service.cpp)
 target_compile_features(ventouse_service PRIVATE cxx_std_17)
@@ -64,6 +64,9 @@ if(BUILD_TESTING)
   ament_add_pytest_test(ventouse_service_test test/test_ventouse_service.py
     TIMEOUT 90
     ENV VENTOUSE_SERVICE_EXECUTABLE=$<TARGET_FILE:ventouse_service>)
+  ament_add_pytest_test(robot_control_test test/test_robot_control.py
+    TIMEOUT 60
+    ENV ROBOT_CONTROL_EXECUTABLE=$<TARGET_FILE:robot_control>)
   find_package(ament_lint_auto REQUIRED)
   # the following line skips the linter which checks for copyrights
   # comment the line when a copyright and license is added to all source files
