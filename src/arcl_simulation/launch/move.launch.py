@@ -7,6 +7,7 @@ Services (nœud ventouse_service) :
   /robot_omni/poignet/set        true = 90° (cartons debout), false = 0°
 Actions (nœud robot_control) :
   /go_to_pose       aller en (x, y, theta)  — feedback : elapsed, message
+                    (cible choisie à la souris sur la carte, comme « 2D Goal Pose » dans RViz)
   /rock_centering   centrage sur le marqueur — feedback : marker_visible, err_fwd, err_lat, err_theta, elapsed
 Affiche aussi la position de l'ascenseur et du poignet lue sur /joint_states.
 
@@ -27,9 +28,15 @@ from rclpy.action import ActionClient
 from rclpy.action.graph import get_action_names_and_types
 from rclpy.executors import SingleThreadedExecutor
 from rclpy.node import Node
+from rclpy.time import Time
 from rosidl_runtime_py.utilities import get_action
 from sensor_msgs.msg import JointState
 from std_srvs.srv import SetBool
+
+try:
+    from tf2_ros import Buffer, TransformListener
+except ImportError:      # sans tf2_ros, la carte marche mais n'affiche pas le robot
+    Buffer = TransformListener = None
 
 SERVICES = {
     'tous': '/robot_omni/ventouse/set',
@@ -48,8 +55,20 @@ ACTIONS = {
 
 ECHELLE_CIBLE = 0.10   # m : erreur affichée au bord de la cible de centrage
 
+# Carte cliquable de /go_to_pose. Les bornes sont celles du repère dans lequel le serveur
+# attend x, y, theta : à adapter à ton arène.
+CARTE = {
+    'x_min': 0.0, 'x_max': 3.0,
+    'y_min': 0.0, 'y_max': 2.0,
+    'pas': 0.5,              # m entre deux lignes de grille
+    'repere': 'map',         # frame des poses, pour afficher le robot via TF
+    'robot': 'base_link',
+    'taille_robot': 0.30,    # m, côté du carré dessiné
+}
+PETITE = ('TkDefaultFont', 8)
+
 C = {
-    'fond': '#f4f5f7', 'carte': '#ffffff', 'texte': '#1f2328', 'doux': '#6b7280',
+    'fond': '#f4f5f7', 'carte': '#ffffff', 'texte': '#1f2328', 'doux': '#6b7280', 'table': '#fbfaf5',
     'accent': '#2563eb', 'accent_actif': '#1d4ed8', 'accent_off': '#a9bff0',
     'danger': '#dc2626', 'danger_actif': '#b91c1c', 'danger_off': '#efb4b4',
     'ok': '#16a34a', 'erreur': '#b3261e', 'bordure': '#d0d4da', 'grille': '#e5e7eb',
@@ -74,6 +93,11 @@ class Pont(Node):
         self.annulation_demandee = set()
         self.types_signales = set()
         self.create_timer(1.0, self.chercher_actions)
+
+        if Buffer is not None:
+            self.tf_buffer = Buffer()
+            self.tf_ecoute = TransformListener(self.tf_buffer, self)
+            self.create_timer(0.1, self.lire_pose)
 
     # --- services ---
     def appeler(self, cle, valeur, libelle):
@@ -185,6 +209,15 @@ class Pont(Node):
         return bool(en_cours)
 
     # --- état ---
+    def lire_pose(self):
+        try:
+            tf = self.tf_buffer.lookup_transform(CARTE['repere'], CARTE['robot'], Time())
+        except Exception:  # noqa: BLE001 - TF pas encore disponible : on réessaie au prochain tour
+            return
+        t, q = tf.transform.translation, tf.transform.rotation
+        lacet = math.atan2(2 * (q.w * q.z + q.x * q.y), 1 - 2 * (q.y * q.y + q.z * q.z))
+        self.sortie.put(('pose', t.x, t.y, lacet))
+
     def disponibilites(self):
         dispo = {SERVICES[k]: c.service_is_ready() for k, c in self.clients_srv.items()}
         dispo.update({ACTIONS[k]['nom']: self.action_prete(k) for k in ACTIONS})
@@ -228,16 +261,24 @@ class Interface:
         self.en_cours = None          # une seule commande de service à la fois, comme le nœud
         self.boutons = []
         self.action_en_cours = None   # une seule action de base à la fois (les deux bougent la base)
+        self.but_en_attente = None    # nouvelle cible donnée pendant un déplacement
+        self.pose_robot = None        # (x, y, lacet) lu sur TF
+        self.trace = []
+        self.cible_pose = None        # dernière cible envoyée
+        self.saisie = None            # cible en cours de saisie à la souris
+        self.appui_px = (0, 0)
 
         racine.title('Pupitre robot_omni')
-        racine.minsize(880, 0)
+        racine.minsize(1000, 0)
         appliquer_style(racine)
 
         cadre = ttk.Frame(racine, padding=14)
         cadre.grid(sticky='nsew')
         racine.columnconfigure(0, weight=1)
         racine.rowconfigure(0, weight=1)
-        cadre.columnconfigure((0, 1), weight=1, uniform='col')
+        cadre.columnconfigure(0, weight=2)
+        cadre.columnconfigure(1, weight=3)
+        cadre.rowconfigure(1, weight=3)
 
         ttk.Label(cadre, text='Pupitre robot_omni', style='Titre.TLabel').grid(
             row=0, column=0, columnspan=2, sticky='w', pady=(0, 10))
@@ -258,7 +299,7 @@ class Interface:
         cadre.rowconfigure(3, weight=1)
         bloc.columnconfigure(0, weight=1)
         bloc.rowconfigure(0, weight=1)
-        self.journal = tk.Text(bloc, height=9, state='disabled', wrap='word', relief='flat',
+        self.journal = tk.Text(bloc, height=6, state='disabled', wrap='word', relief='flat',
                                background=C['carte'], foreground=C['texte'], padx=8, pady=6,
                                highlightthickness=1, highlightbackground=C['bordure'],
                                font=('TkFixedFont', 10))
@@ -324,38 +365,51 @@ class Interface:
         self.annulers = {}
         self.progres = {}
 
-        # --- aller à une pose ---
+        # --- aller à une pose : carte cliquable, comme « 2D Goal Pose » de RViz ---
         nav = ttk.LabelFrame(parent, text='Aller à une pose   /go_to_pose', padding=10)
-        nav.grid(row=0, column=0, sticky='ew')
-        self.var_x = tk.StringVar(value='0.00')
-        self.var_y = tk.StringVar(value='0.00')
-        self.var_t = tk.StringVar(value='0')
-        champs = (('x (m)', self.var_x, 0.1, '%.2f'),
-                  ('y (m)', self.var_y, 0.1, '%.2f'),
-                  ('θ (°)', self.var_t, 15, '%.0f'))
-        for i, (texte, var, pas, fmt) in enumerate(champs):
-            ttk.Label(nav, text=texte).grid(row=0, column=2 * i, sticky='w', padx=(0 if i == 0 else 12, 4))
-            sp = ttk.Spinbox(nav, textvariable=var, from_=-1000, to=1000, increment=pas,
-                             format=fmt, width=7, justify='right')
-            sp.grid(row=0, column=2 * i + 1, sticky='ew')
-            sp.bind('<Return>', lambda _e: self.aller())
-            nav.columnconfigure(2 * i + 1, weight=1)
+        nav.grid(row=0, column=0, sticky='nsew')
+        parent.rowconfigure(0, weight=1)
+        nav.columnconfigure(0, weight=1)
+        nav.rowconfigure(1, weight=1)
+        ttk.Label(nav, text='Clic gauche : position   ·   glisser : orientation   ·   '
+                            'relâcher : envoyer   ·   clic droit : annuler',
+                  style='Doux.TLabel').grid(row=0, column=0, sticky='w', pady=(0, 6))
+        self.carte = tk.Canvas(nav, height=300, background=C['carte'], cursor='crosshair',
+                               highlightthickness=1, highlightbackground=C['bordure'])
+        self.carte.grid(row=1, column=0, sticky='nsew')
+        self.carte.bind('<Configure>', lambda _e: self.dessiner_carte())
+        self.carte.bind('<ButtonPress-1>', self.carte_appui)
+        self.carte.bind('<B1-Motion>', self.carte_glisse)
+        self.carte.bind('<ButtonRelease-1>', self.carte_relache)
+        self.carte.bind('<ButtonPress-3>', lambda _e: self.annuler('go_to_pose'))
+        self.carte.bind('<Motion>', self.carte_survol)
+        self.carte.bind('<Leave>', lambda _e: self.lbl_curseur.configure(text=''))
+
+        sous = ttk.Frame(nav)
+        sous.grid(row=2, column=0, sticky='ew', pady=(4, 0))
+        sous.columnconfigure(0, weight=1)
+        self.lbl_cible = ttk.Label(sous, text='Cible : —')
+        self.lbl_cible.grid(row=0, column=0, sticky='w')
+        self.lbl_curseur = ttk.Label(sous, text='', style='Doux.TLabel')
+        self.lbl_curseur.grid(row=0, column=1, sticky='e')
 
         boutons = ttk.Frame(nav)
-        boutons.grid(row=1, column=0, columnspan=6, sticky='ew', pady=(10, 0))
+        boutons.grid(row=3, column=0, sticky='ew', pady=(8, 0))
         boutons.columnconfigure((0, 1), weight=1)
-        self.btn_aller = ttk.Button(boutons, text='Aller', style='Accent.TButton', command=self.aller)
+        self.btn_aller = ttk.Button(boutons, text='Renvoyer la cible', style='Accent.TButton',
+                                    command=self.envoyer_cible)
         self.btn_aller.grid(row=0, column=0, sticky='ew', padx=(0, 4))
+        self.btn_aller.state(['disabled'])
         self.annulers['go_to_pose'] = ttk.Button(boutons, text='Annuler', style='Danger.TButton',
                                                  command=lambda: self.annuler('go_to_pose'))
         self.annulers['go_to_pose'].grid(row=0, column=1, sticky='ew', padx=(4, 0))
 
         self.progres['go_to_pose'] = ttk.Progressbar(nav, mode='indeterminate')
-        self.progres['go_to_pose'].grid(row=2, column=0, columnspan=6, sticky='ew', pady=(10, 4))
+        self.progres['go_to_pose'].grid(row=4, column=0, sticky='ew', pady=(8, 4))
         info = ttk.Frame(nav)
-        info.grid(row=3, column=0, columnspan=6, sticky='ew')
+        info.grid(row=5, column=0, sticky='ew')
         info.columnconfigure(0, weight=1)
-        self.lbl_nav_msg = ttk.Label(info, text='En attente', style='Doux.TLabel', wraplength=300)
+        self.lbl_nav_msg = ttk.Label(info, text='En attente', style='Doux.TLabel', wraplength=420)
         self.lbl_nav_msg.grid(row=0, column=0, sticky='w')
         self.lbl_nav_t = ttk.Label(info, text='', style='Valeur.TLabel')
         self.lbl_nav_t.grid(row=0, column=1, sticky='e')
@@ -442,18 +496,135 @@ class Interface:
         self.ecrire(f'{libelle}…', 'info')
         self.pont.appeler(cle, valeur, libelle)
 
-    def aller(self):
-        if self.action_en_cours:
+    # ------------------------------------------------------------------ carte de la base
+    def echelle_carte(self):
+        """Échelle (px/m) et décalage pour que l'arène tienne dans le canevas, proportions gardées."""
+        w, h = self.carte.winfo_width(), self.carte.winfo_height()
+        marge = 30
+        lx = CARTE['x_max'] - CARTE['x_min']
+        ly = CARTE['y_max'] - CARTE['y_min']
+        k = max(min((w - 2 * marge) / lx, (h - 2 * marge) / ly), 1e-6)
+        return k, (w - k * lx) / 2, (h - k * ly) / 2
+
+    def vers_ecran(self, x, y):
+        k, ox, oy = self.echelle_carte()
+        return ox + (x - CARTE['x_min']) * k, oy + (CARTE['y_max'] - y) * k   # y vers le haut
+
+    def vers_monde(self, u, v):
+        k, ox, oy = self.echelle_carte()
+        x = CARTE['x_min'] + (u - ox) / k
+        y = CARTE['y_max'] - (v - oy) / k
+        return (min(max(x, CARTE['x_min']), CARTE['x_max']),
+                min(max(y, CARTE['y_min']), CARTE['y_max']))
+
+    def dessiner_carte(self):
+        c = self.carte
+        c.delete('all')
+        if c.winfo_width() < 50:
             return
-        try:
-            x = float(self.var_x.get().replace(',', '.'))
-            y = float(self.var_y.get().replace(',', '.'))
-            t_deg = float(self.var_t.get().replace(',', '.'))
-        except ValueError:
-            self.ecrire('Pose invalide : x, y et θ doivent être des nombres', 'erreur')
+        x0, y0 = self.vers_ecran(CARTE['x_min'], CARTE['y_max'])
+        x1, y1 = self.vers_ecran(CARTE['x_max'], CARTE['y_min'])
+        c.create_rectangle(x0, y0, x1, y1, fill=C['table'], outline='')
+
+        pas = CARTE['pas']
+        v = math.ceil(CARTE['x_min'] / pas) * pas
+        while v <= CARTE['x_max'] + 1e-9:
+            u, _ = self.vers_ecran(v, 0)
+            c.create_line(u, y0, u, y1, fill=C['grille'])
+            c.create_text(u, y1 + 4, text=f'{v:g}', anchor='n', fill=C['doux'], font=PETITE)
+            v += pas
+        v = math.ceil(CARTE['y_min'] / pas) * pas
+        while v <= CARTE['y_max'] + 1e-9:
+            _, w = self.vers_ecran(0, v)
+            c.create_line(x0, w, x1, w, fill=C['grille'])
+            c.create_text(x0 - 4, w, text=f'{v:g}', anchor='e', fill=C['doux'], font=PETITE)
+            v += pas
+        c.create_rectangle(x0, y0, x1, y1, outline=C['bordure'], width=2)
+
+        if CARTE['x_min'] <= 0 <= CARTE['x_max'] and CARTE['y_min'] <= 0 <= CARTE['y_max']:
+            u, w = self.vers_ecran(0, 0)
+            c.create_line(u, w, u + 26, w, fill='#dc2626', width=2, arrow='last')
+            c.create_line(u, w, u, w - 26, fill='#16a34a', width=2, arrow='last')
+
+        if len(self.trace) >= 2:
+            pts = [p for xy in self.trace for p in self.vers_ecran(*xy)]
+            c.create_line(*pts, fill='#9aa4b2', width=2)
+        if self.cible_pose:
+            self.fleche(*self.cible_pose, plein=True)
+        if self.pose_robot:
+            self.dessiner_robot(*self.pose_robot)
+        if self.saisie:
+            self.fleche(*self.saisie, plein=False)
+
+    def fleche(self, x, y, t, plein):
+        u, v = self.vers_ecran(x, y)
+        style = {} if plein else {'dash': (5, 3)}
+        self.carte.create_line(u, v, u + 40 * math.cos(t), v - 40 * math.sin(t), fill=C['accent'],
+                               width=3, arrow='last', arrowshape=(12, 14, 5), **style)
+        self.carte.create_oval(u - 5, v - 5, u + 5, v + 5, outline=C['accent'], width=2,
+                               fill=C['accent'] if plein else C['carte'])
+
+    def dessiner_robot(self, x, y, t):
+        c = self.carte
+        s = CARTE['taille_robot'] / 2
+        cos_t, sin_t = math.cos(t), math.sin(t)
+        pts = []
+        for dx, dy in ((s, s), (-s, s), (-s, -s), (s, -s)):
+            pts += self.vers_ecran(x + dx * cos_t - dy * sin_t, y + dx * sin_t + dy * cos_t)
+        c.create_polygon(*pts, fill='#dbe4f3', outline=C['texte'], width=2)
+        u, v = self.vers_ecran(x, y)
+        k = self.echelle_carte()[0]
+        c.create_line(u, v, u + 1.3 * s * k * cos_t, v - 1.3 * s * k * sin_t,
+                      fill=C['texte'], width=2, arrow='last')
+        c.create_text(6, 4, anchor='nw', fill=C['doux'], font=PETITE,
+                      text=f'robot   x {x:.2f}   y {y:.2f}   θ {math.degrees(t):.0f}°')
+
+    def carte_survol(self, e):
+        x, y = self.vers_monde(e.x, e.y)
+        self.lbl_curseur.configure(text=f'x {x:.2f}   y {y:.2f} m')
+
+    def carte_appui(self, e):
+        x, y = self.vers_monde(e.x, e.y)
+        # sans glisser, on garde l'orientation de la cible précédente (ou celle du robot)
+        t = self.cible_pose[2] if self.cible_pose else (self.pose_robot[2] if self.pose_robot else 0.0)
+        self.saisie = [x, y, t]
+        self.appui_px = (e.x, e.y)
+        self.dessiner_carte()
+
+    def carte_glisse(self, e):
+        if not self.saisie:
             return
-        self.lancer_action('go_to_pose', {'x': x, 'y': y, 'theta': math.radians(t_deg)},
-                           f'Aller à ({x:.2f} m, {y:.2f} m, {t_deg:.0f}°)')
+        du, dv = e.x - self.appui_px[0], e.y - self.appui_px[1]
+        if math.hypot(du, dv) > 6:
+            self.saisie[2] = math.atan2(-dv, du)
+            self.lbl_curseur.configure(text=f'θ {math.degrees(self.saisie[2]):.0f}°')
+        self.dessiner_carte()
+
+    def carte_relache(self, _e):
+        if not self.saisie:
+            return
+        self.cible_pose = tuple(self.saisie)
+        self.saisie = None
+        self.envoyer_cible()
+
+    def envoyer_cible(self):
+        if not self.cible_pose:
+            return
+        x, y, t = self.cible_pose
+        t_deg = math.degrees(t)
+        self.lbl_cible.configure(text=f'Cible :  x {x:.2f} m    y {y:.2f} m    θ {t_deg:.0f}°')
+        champs = {'x': x, 'y': y, 'theta': t}
+        libelle = f'Aller à ({x:.2f} m, {y:.2f} m, {t_deg:.0f}°)'
+        if self.action_en_cours == 'go_to_pose':
+            # comme RViz : la nouvelle cible remplace l'ancienne
+            self.annuler('go_to_pose')
+            self.but_en_attente = (champs, libelle)
+            self.ecrire('Nouvelle cible : elle part dès l\'arrêt du déplacement en cours', 'info')
+        elif self.action_en_cours:
+            self.ecrire('Centrage en cours : annule-le avant d\'envoyer une pose', 'erreur')
+        else:
+            self.lancer_action('go_to_pose', champs, libelle)
+        self.dessiner_carte()
 
     def lancer_action(self, cle, champs, libelle):
         if self.action_en_cours:
@@ -475,6 +646,8 @@ class Interface:
         self.pont.envoyer_action(cle, champs, libelle)
 
     def annuler(self, cle):
+        if cle == 'go_to_pose':
+            self.but_en_attente = None
         if self.action_en_cours != cle:
             return
         self.annulers[cle].state(['disabled'])
@@ -484,7 +657,8 @@ class Interface:
     def fin_action(self, cle, ok, texte):
         self.ecrire(texte, 'ok' if ok else 'erreur')
         self.action_en_cours = None
-        self.btn_aller.state(['!disabled'])
+        if self.cible_pose:
+            self.btn_aller.state(['!disabled'])
         self.btn_centrer.state(['!disabled'])
         for b in self.annulers.values():
             b.state(['disabled'])
@@ -492,6 +666,10 @@ class Interface:
             p.stop()
         if cle == 'go_to_pose':
             self.lbl_nav_msg.configure(text=texte, foreground=C['ok'] if ok else C['erreur'])
+            if self.but_en_attente:
+                champs, libelle = self.but_en_attente
+                self.but_en_attente = None
+                self.lancer_action('go_to_pose', champs, libelle)
 
     def sur_feedback(self, cle, fb):
         if cle == 'go_to_pose':
@@ -537,6 +715,12 @@ class Interface:
                     self.fin_action(cle, ok, texte)
                 elif evt[0] == 'info':
                     self.ecrire(evt[1], 'info')
+                elif evt[0] == 'pose':
+                    _, x, y, lacet = evt
+                    self.pose_robot = (x, y, lacet)
+                    if not self.trace or math.hypot(x - self.trace[-1][0], y - self.trace[-1][1]) > 0.01:
+                        self.trace = (self.trace + [(x, y)])[-500:]
+                    self.dessiner_carte()
         except queue.Empty:
             pass
         self.racine.after(50, self.lire_file)
