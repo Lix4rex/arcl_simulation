@@ -13,6 +13,12 @@
 //   <topic_ascenseur> topic gz.msgs.Double du JointPositionController de l'ascenseur (optionnel)
 //   <hauteur>   hauteur de levée en m                      (défaut : 0.05)
 //   <delai_lacher> temps de descente avant de relâcher, s  (défaut : 0.7)
+//   <fenetre_prise> après le premier contact, temps pendant lequel on continue
+//                  d'aspirer avant de lever, s (défaut : 0). Permet de coller
+//                  plusieurs objets qui ne touchent pas tous au même pas.
+//   <portee>    distance max, en m, entre le centre d'une bouche et la boîte de collision
+//               d'un objet, côté bouche, pour le coller sans contact (défaut : 0 = contact
+//               obligatoire). Le robot peut s'arrêter juste avant la pile sans la pousser.
 //
 // Une seule opération est acceptée à la fois, sans file d'attente.
 // Commande : 1 <id> <PING|TAKE|RELEASE> <expiration_unix_ms>
@@ -20,16 +26,20 @@
 // L'échéance réelle est vérifiée même lorsque la simulation est en pause.
 // État de diagnostic sur /model/<robot>/ventouse/etat (configurable).
 
+#include <algorithm>
 #include <mutex>
 #include <chrono>
 #include <cstdint>
 #include <memory>
 #include <optional>
 #include <set>
+#include <utility>
 #include <sstream>
 #include <string>
 #include <vector>
 
+#include <gz/math/Pose3.hh>
+#include <gz/math/Vector3.hh>
 #include <gz/msgs/double.pb.h>
 #include <gz/msgs/stringmsg.pb.h>
 #include <gz/plugin/Register.hh>
@@ -39,11 +49,15 @@
 #include <gz/sim/Model.hh>
 #include <gz/sim/System.hh>
 #include <gz/sim/Util.hh>
+#include <gz/sim/components/Collision.hh>
 #include <gz/sim/components/ContactSensorData.hh>
 #include <gz/sim/components/DetachableJoint.hh>
+#include <gz/sim/components/Geometry.hh>
 #include <gz/sim/components/Name.hh>
 #include <gz/sim/components/ParentEntity.hh>
 #include <gz/sim/components/Static.hh>
+#include <sdf/Box.hh>
+#include <sdf/Geometry.hh>
 
 using namespace gz;
 using namespace sim;
@@ -103,6 +117,8 @@ class Ventouse : public System, public ISystemConfigure, public ISystemPreUpdate
 
     this->hauteur = _sdf->Get<double>("hauteur", 0.05).first;
     this->delaiLacher = _sdf->Get<double>("delai_lacher", 0.7).first;
+    this->fenetrePrise = std::max(0.0, _sdf->Get<double>("fenetre_prise", 0.0).first);
+    this->portee = std::max(0.0, _sdf->Get<double>("portee", 0.0).first);
     if (_sdf->HasElement("topic_ascenseur"))
     {
       this->pubAscenseur = this->node.Advertise<msgs::Double>(
@@ -198,7 +214,10 @@ class Ventouse : public System, public ISystemConfigure, public ISystemPreUpdate
     if (std::chrono::steady_clock::now() >= this->operation->echeance)
     {
       if (this->etat == Etat::ASPIRATION)
+      {
+        this->Detacher(_ecm);   // prise partielle pendant la fenêtre : on annule tout
         this->ChangerEtat(Etat::LIBRE);
+      }
       else if (this->etat == Etat::DESCENTE)
       {
         this->Ascenseur(this->hauteur);
@@ -245,21 +264,27 @@ class Ventouse : public System, public ISystemConfigure, public ISystemPreUpdate
     {
       if (t < this->lacherA)
         return;
-      for (const Entity j : this->liaisons)
-        _ecm.RequestRemoveEntity(j);
-      this->liaisons.clear();
+      this->Detacher(_ecm);
       gzmsg << "[Ventouse] lâché\n";
       this->ChangerEtat(Etat::LIBRE);
       this->TerminerOperation(true, "RELEASED");
       return;                 // contacts à jour au pas suivant
     }
 
-    // Aspiration active : on colle dès qu'un objet touche.
+    // Aspiration active : on colle tout ce qui touche, à chaque pas, pendant la fenêtre
+    // qui suit le premier contact, puis on lève.
     if (this->etat == Etat::ASPIRATION && this->Attraper(_ecm))
     {
-      this->Ascenseur(this->hauteur);
-      this->ChangerEtat(Etat::TENU);
-      this->TerminerOperation(true, "TAKEN");
+      if (this->premierContact < 0)
+        this->premierContact = t;
+      if (t >= this->premierContact + this->fenetrePrise)
+      {
+        gzmsg << "[Ventouse] " << this->attaches.size() << " objet(s) tenu(s)\n";
+        this->premierContact = -1;
+        this->Ascenseur(this->hauteur);
+        this->ChangerEtat(Etat::TENU);
+        this->TerminerOperation(true, "TAKEN");
+      }
     }
   }
 
@@ -306,6 +331,63 @@ class Ventouse : public System, public ISystemConfigure, public ISystemPreUpdate
     this->pubAscenseur.Publish(m);
   }
 
+  // Retire toutes les liaisons créées et oublie les objets tenus.
+  private: void Detacher(EntityComponentManager &_ecm)
+  {
+    for (const Entity j : this->liaisons)
+      _ecm.RequestRemoveEntity(j);
+    this->liaisons.clear();
+    this->attaches.clear();
+    this->premierContact = -1;
+  }
+
+  // Objets à portée : boîte de collision à moins de <portee> du centre d'une bouche,
+  // devant la bouche. Aucun contact n'est nécessaire, donc la pile n'est pas poussée.
+  private: void APortee(EntityComponentManager &_ecm, std::set<Entity> &_touches)
+  {
+    if (this->portee <= 0.0)
+      return;
+    std::vector<std::pair<math::Vector3d, math::Vector3d>> centres;  // centre, axe de la bouche
+    for (const Entity b : this->bouches)
+    {
+      const math::Pose3d p = worldPose(b, _ecm);
+      centres.emplace_back(p.Pos(), p.Rot().RotateVector(math::Vector3d::UnitZ));
+    }
+    _ecm.Each<components::Collision, components::Geometry, components::ParentEntity>(
+      [&](const Entity &_col, const components::Collision *,
+          const components::Geometry *_geom, const components::ParentEntity *_parent) -> bool
+      {
+        const sdf::Box *boite = _geom->Data().BoxShape();
+        if (_geom->Data().Type() != sdf::GeometryType::BOX || !boite)
+          return true;
+        const Entity lien = _parent->Data();
+        const Entity modeleAutre = topLevelModel(lien, _ecm);
+        if (modeleAutre == this->modele)
+          return true;                      // soi-même
+        auto stat = _ecm.Component<components::Static>(modeleAutre);
+        if (stat && stat->Data())
+          return true;                      // mur, balise...
+        const math::Pose3d pc = worldPose(_col, _ecm);
+        const math::Vector3d demi = boite->Size() / 2.0;
+        for (const auto &[centre, axe] : centres)
+        {
+          // point de la boîte le plus proche du centre de la bouche
+          const math::Vector3d l = pc.Rot().RotateVectorReverse(centre - pc.Pos());
+          const math::Vector3d proche(std::clamp(l.X(), -demi.X(), demi.X()),
+                                      std::clamp(l.Y(), -demi.Y(), demi.Y()),
+                                      std::clamp(l.Z(), -demi.Z(), demi.Z()));
+          const math::Vector3d d = pc.Pos() + pc.Rot().RotateVector(proche) - centre;
+          if (d.Length() <= this->portee && d.Dot(axe) >= 0.0)
+          {
+            _touches.insert(lien);
+            break;
+          }
+        }
+        return true;
+      });
+  }
+
+  // Colle les nouveaux objets touchés ; vrai si au moins un objet est tenu.
   private: bool Attraper(EntityComponentManager &_ecm)
   {
     std::set<Entity> touches;   // links touchés, chacun attaché une seule fois
@@ -331,16 +413,19 @@ class Ventouse : public System, public ISystemConfigure, public ISystemPreUpdate
         touches.insert(linkAutre);
       }
     }
+    this->APortee(_ecm, touches);
 
     for (const Entity l : touches)
     {
+      if (!this->attaches.insert(l).second)
+        continue;                         // déjà collé à un pas précédent
       const Entity j = _ecm.CreateEntity();
       _ecm.CreateComponent(j, components::DetachableJoint({this->link, l, "fixed"}));
       this->liaisons.push_back(j);
       auto nom = _ecm.Component<components::Name>(topLevelModel(l, _ecm));
       gzmsg << "[Ventouse] attrapé " << (nom ? nom->Data() : "?") << "\n";
     }
-    return !touches.empty();
+    return !this->attaches.empty();
   }
 
   private: transport::Node node;
@@ -348,6 +433,8 @@ class Ventouse : public System, public ISystemConfigure, public ISystemPreUpdate
   private: transport::Node::Publisher pubAscenseur, pubEtat, pubResultat;
   private: bool avecAscenseur{false};
   private: double hauteur{0.05}, delaiLacher{0.7}, lacherA{-1};
+  private: double fenetrePrise{0.0}, premierContact{-1}, portee{0.0};
+  private: std::set<Entity> attaches;
   private: Entity modele{kNullEntity}, link{kNullEntity};
   private: std::vector<Entity> bouches, liaisons;
   private: std::mutex mutex;
