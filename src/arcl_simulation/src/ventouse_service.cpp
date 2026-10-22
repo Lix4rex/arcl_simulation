@@ -55,31 +55,40 @@ public:
            << Clock::now().time_since_epoch().count();
     prefix_ = prefix.str();
 
-    ascenseur_ = create_publisher<std_msgs::msg::Float64>("/robot_omni/ascenseur/cmd_pos", 10);
-    poignet_ = create_publisher<std_msgs::msg::Float64>("/robot_omni/poignet/cmd_pos", 10);
+    ascenseur_pub_ = create_publisher<std_msgs::msg::Float64>("/robot_omni/ascenseur/cmd_pos", 10);
+    poignet_pub_ = create_publisher<std_msgs::msg::Float64>("/robot_omni/poignet/cmd_pos", 10);
 
     for (int i = 0; i < N; ++i) {
       const std::string base = "/robot_omni/ventouse_" + std::to_string(i + 1);
+
       etages_[i].commande = create_publisher<std_msgs::msg::String>(base + "/commande", 10);
+      
       etages_[i].resultat = create_subscription<std_msgs::msg::String>(
         base + "/resultat", 10,
-        [this, i](const std_msgs::msg::String & msg) {on_result(i, msg);});
+        [this, i](const std_msgs::msg::String & msg) {on_result(i, msg);}
+      );
+
       etages_[i].service = create_service<SetBool>(
         base + "/set",
         [this, i](std::shared_ptr<rmw_request_id_t> header, SetBool::Request::SharedPtr req) {
           on_request(etages_[i].service, std::move(header), {i}, req->data);
-        });
+        }
+      );
     }
+
     tous_ = create_service<SetBool>(
       "/robot_omni/ventouse/set",
       [this](std::shared_ptr<rmw_request_id_t> header, SetBool::Request::SharedPtr req) {
         on_request(tous_, std::move(header), {0, 1, 2}, req->data);
-      });
+      }
+    );
+
     service_poignet_ = create_service<SetBool>(
       "/robot_omni/poignet/set",
       [this](std::shared_ptr<rmw_request_id_t> header, SetBool::Request::SharedPtr req) {
         on_poignet(std::move(header), req->data);
-      });
+      }
+    );
 
     timer_ = create_wall_timer(std::chrono::milliseconds(20), [this]() {tick();});
   }
@@ -87,16 +96,14 @@ public:
 private:
   enum class Phase { PING, DESCENTE, COMMANDE };
 
-  struct Etage
-  {
+  struct Etage{
     rclcpp::Publisher<std_msgs::msg::String>::SharedPtr commande;
     rclcpp::Subscription<std_msgs::msg::String>::SharedPtr resultat;
     rclcpp::Service<SetBool>::SharedPtr service;
     bool tenu{false};
   };
 
-  struct Demande
-  {
+  struct Demande{
     rclcpp::Service<SetBool>::SharedPtr service;
     std::shared_ptr<rmw_request_id_t> header;
     std::vector<int> etages;
@@ -108,8 +115,7 @@ private:
     std::string erreur;               // vide si tout va bien
   };
 
-  struct Rotation
-  {
+  struct Rotation{
     std::shared_ptr<rmw_request_id_t> header;
     Clock::time_point debut, fin;   // debut : fin de la montée de l'ascenseur
     bool debout;
@@ -117,49 +123,40 @@ private:
     bool charge{false};             // des pierres sont tenues
   };
 
-  std::chrono::milliseconds duree(double s, const char * nom)
-  {
+  std::chrono::milliseconds duree(double s, const char * nom){
     if (!std::isfinite(s) || s <= 0.0 || s > 3600.0) {
       throw std::invalid_argument(std::string(nom) + " doit être dans ]0, 3600]");
     }
     return std::chrono::milliseconds(static_cast<int64_t>(std::ceil(s * 1000.0)));
   }
 
-  static void respond(const rclcpp::Service<SetBool>::SharedPtr & service,
-    const std::shared_ptr<rmw_request_id_t> & header, bool success, const std::string & message)
-  {
+  static void respond(const rclcpp::Service<SetBool>::SharedPtr & service, const std::shared_ptr<rmw_request_id_t> & header, bool success, const std::string & message){
     SetBool::Response response;
     response.success = success;
     response.message = message;
     service->send_response(*header, response);
   }
 
-  void lever(double z)
-  {
+  void lever(double z){
     std_msgs::msg::Float64 m;
     m.data = z;
-    ascenseur_->publish(m);
+    ascenseur_pub_->publish(m);
   }
 
-  bool un_etage_tenu() const
-  {
+  bool un_etage_tenu() const{
     return std::any_of(etages_.begin(), etages_.end(), [](const Etage & e) {return e.tenu;});
   }
 
   // Protocole du plugin : 1 <id> <PING|TAKE|RELEASE> <expiration_unix_ms>
-  void envoyer(int i, const std::string & operation)
-  {
-    const auto expiration = std::chrono::duration_cast<std::chrono::milliseconds>(
-      std::chrono::system_clock::now().time_since_epoch() + timeout_).count();
+  void envoyer(int i, const std::string & operation){
+    const auto expiration = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch() + timeout_).count();
     demande_->ids[i] = prefix_ + '-' + std::to_string(++counter_);
     std_msgs::msg::String msg;
     msg.data = "1 " + demande_->ids[i] + " " + operation + " " + std::to_string(expiration);
     etages_[i].commande->publish(msg);
   }
 
-  void on_request(const rclcpp::Service<SetBool>::SharedPtr & service,
-    std::shared_ptr<rmw_request_id_t> header, std::vector<int> etages, bool prendre)
-  {
+  void on_request(const rclcpp::Service<SetBool>::SharedPtr & service, std::shared_ptr<rmw_request_id_t> header, std::vector<int> etages, bool prendre){
     if (rotation_) {
       respond(service, header, false, "Poignet en mouvement, réessayer après");
       return;
@@ -181,15 +178,13 @@ private:
     for (int i : demande_->etages) {envoyer(i, "PING");}
   }
 
-  void on_result(int i, const std_msgs::msg::String & msg)
-  {
+  void on_result(int i, const std_msgs::msg::String & msg){
     std::istringstream input(msg.data);
     std::string version, id, status, code, extra;
-    if (!(input >> version >> id >> status >> code) || version != "1" || (input >> extra) ||
-      !demande_ || id != demande_->ids[i])
-    {
+    if (!(input >> version >> id >> status >> code) || version != "1" || (input >> extra) || !demande_ || id != demande_->ids[i]){
       return;
     }
+
     auto & d = *demande_;
     if (status == "OK" && code == "READY") {
       if (d.phase != Phase::PING) {return;}
@@ -205,6 +200,7 @@ private:
       }
       return;
     }
+
     if (d.phase != Phase::COMMANDE || d.finis.count(i)) {return;}
     if (status == "OK" && (code == "TAKEN" || code == "ALREADY_HELD")) {
       etages_[i].tenu = true;
@@ -219,8 +215,7 @@ private:
     if (d.finis.size() == d.etages.size()) {terminer();}
   }
 
-  void terminer(const std::string & erreur_forcee = "")
-  {
+  void terminer(const std::string & erreur_forcee = ""){
     auto d = std::move(*demande_);
     demande_.reset();
     if (!erreur_forcee.empty()) {d.erreur = erreur_forcee;}
@@ -234,8 +229,7 @@ private:
     respond(d.service, d.header, d.erreur.empty(), message);
   }
 
-  void on_poignet(std::shared_ptr<rmw_request_id_t> header, bool debout)
-  {
+  void on_poignet(std::shared_ptr<rmw_request_id_t> header, bool debout){
     if (rotation_) {
       respond(service_poignet_, header, false, "Poignet déjà en mouvement");
       return;
@@ -256,34 +250,39 @@ private:
     rotation_ = std::move(r);
   }
 
-  void tick()
-  {
+  void tick(){
     const auto now = Clock::now();
+    
     if (rotation_ && !rotation_->lancee && now >= rotation_->debut) {
       std_msgs::msg::Float64 m;
       m.data = rotation_->debout ? angle_poignet_ : 0.0;
-      poignet_->publish(m);
+      poignet_pub_->publish(m);
       rotation_->lancee = true;
       rotation_->fin = now + duree_poignet_;
     }
+
     if (rotation_ && rotation_->lancee && now >= rotation_->fin) {
       if (rotation_->charge) {lever(hauteur_);}   // retour à la hauteur de transport
       respond(service_poignet_, rotation_->header, true,
         rotation_->debout ? "Poignet à 90°" : "Poignet à 0°");
       rotation_.reset();
     }
+
     if (!demande_) {return;}
+
     auto & d = *demande_;
     if (now >= d.echeance) {
       terminer(d.phase == Phase::PING ? "backend de ventouse indisponible" : "délai dépassé");
       return;
     }
+
     if (d.phase == Phase::PING && now >= d.prochain_ping) {
       for (int i : d.etages) {
         if (!d.prets.count(i)) {envoyer(i, "PING");}
       }
       d.prochain_ping = now + std::chrono::milliseconds(100);
     }
+
     if (d.phase == Phase::DESCENTE && now >= d.fin_descente) {
       d.phase = Phase::COMMANDE;
       for (int i : d.etages) {envoyer(i, "RELEASE");}
@@ -294,12 +293,17 @@ private:
   double hauteur_{0.095}, hauteur_rotation_{0.12}, angle_poignet_{1.5708};
   std::string prefix_;
   uint64_t counter_{0};
+
   std::array<Etage, N> etages_;
+
   std::optional<Demande> demande_;
   std::optional<Rotation> rotation_;
-  rclcpp::Publisher<std_msgs::msg::Float64>::SharedPtr ascenseur_, poignet_;
+
+  rclcpp::Publisher<std_msgs::msg::Float64>::SharedPtr ascenseur_pub_, poignet_pub_
+  ;
   rclcpp::Service<SetBool>::SharedPtr tous_, service_poignet_;
   rclcpp::TimerBase::SharedPtr timer_;
+
 };
 
 int main(int argc, char ** argv)

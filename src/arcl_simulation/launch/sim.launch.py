@@ -7,6 +7,7 @@ from launch.conditions import IfCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
+from launch.actions import ExecuteProcess
 
 
 def generate_launch_description():
@@ -106,6 +107,11 @@ def generate_launch_description():
         parameters=[aruco_params]
     )
 
+    command_interface = ExecuteProcess(
+        cmd=['python3', os.path.join(pkg, 'launch', 'move.launch.py')],
+        output='screen',
+    )
+
     return LaunchDescription([
         DeclareLaunchArgument('rviz', default_value='true'),
         AppendEnvironmentVariable('GZ_SIM_RESOURCE_PATH', os.path.join(pkg, 'worlds')),
@@ -113,5 +119,6 @@ def generate_launch_description():
         gz, bridge, rsp, rviz, 
         robot_control, rock_centering, table_markers,ventouse_service,
         wheel_odometry, otos_simulator, ekf_odom, beacon_localization,
-        aruco_node
+        aruco_node,
+        command_interface
     ])

@@ -7,6 +7,8 @@
 #include "robot_msgs/msg/robot_speed.hpp"
 #include "nav_msgs/msg/path.hpp"
 #include "visualization_msgs/msg/marker.hpp"
+#include "robot_msgs/action/go_to_pose.hpp"
+#include "rclcpp_action/rclcpp_action.hpp"
 
 #include <cmath>
 #include <algorithm>
@@ -41,47 +43,49 @@ class RobotControl : public rclcpp::Node{
 
                         cmd_vel_wheel1_pub_ = this->create_publisher<std_msgs::msg::Float64>(
                                 "/robot_omni/roue_1/cmd_vel", 10
-                        );
+                        ); // send control
 
                         cmd_vel_wheel2_pub_ = this->create_publisher<std_msgs::msg::Float64>(
                                 "/robot_omni/roue_2/cmd_vel", 10
-                        );
+                        ); // send control
 
                         cmd_vel_wheel3_pub_ = this->create_publisher<std_msgs::msg::Float64>(
                                 "/robot_omni/roue_3/cmd_vel", 10
-                        );
+                        ); // send control
 
                         cmd_vel_wheel4_pub_ = this->create_publisher<std_msgs::msg::Float64>(
                                 "/robot_omni/roue_4/cmd_vel", 10
-                        );
+                        ); // send control
 
-                        robot_position_sub_ = this->create_subscription<geometry_msgs::msg::PoseStamped>(
-                                "/pose_estimation", 10,
-                                std::bind(&RobotControl::robot_position_callback, this, std::placeholders::_1)
-                        );
-
-                        goal_sub_ = this->create_subscription<geometry_msgs::msg::PoseStamped>(
-                                "/goal_pose", 10,
-                                std::bind(&RobotControl::goal_callback, this, std::placeholders::_1)
-                        );
+                        pose_action_server = rclcpp_action::create_server<robot_msgs::action::GoToPose>(
+                                this, "/go_to_pose",
+                                std::bind(&RobotControl::handle_goal, this, std::placeholders::_1, std::placeholders::_2),
+                                std::bind(&RobotControl::handle_cancel, this, std::placeholders::_1),
+                                std::bind(&RobotControl::handle_accepted, this, std::placeholders::_1)
+                        ); // get control demand
 
                         robot_speed_sub_ = this->create_subscription<robot_msgs::msg::RobotSpeed>(
                                 "/speed_command", 10,
                                 std::bind(&RobotControl::robot_speed_callback, this, std::placeholders::_1)
-                        );
+                        ); // get control demand
+
+                        robot_position_sub_ = this->create_subscription<geometry_msgs::msg::PoseStamped>(
+                                "/pose_estimation", 10,
+                                std::bind(&RobotControl::robot_position_callback, this, std::placeholders::_1)
+                        ); // information
 
                         obstacles_sub_ = this->create_subscription<robot_msgs::msg::ObstacleArray>(
                                 "/obstacles_scan", 10,
                                 std::bind(&RobotControl::obstacles_callback, this, std::placeholders::_1)
-                        );
+                        ); // information
 
                         obstacle_point_pub_ = this->create_publisher<visualization_msgs::msg::Marker>(
                                 "/obstacle_point", 10
-                        );
+                        ); // log
 
                         path_pub_ = this->create_publisher<nav_msgs::msg::Path>(
                                 "/trajectoire", 10
-                        );
+                        ); // log
 
                         control_timer_ = this->create_wall_timer(20ms, std::bind(&RobotControl::trajectory_control_loop, this));
 
@@ -92,6 +96,41 @@ class RobotControl : public rclcpp::Node{
 
 
         private:
+
+
+                std::shared_ptr<rclcpp_action::ServerGoalHandle<robot_msgs::action::GoToPose>> active_goal_pose_;
+                rclcpp_action::Server<robot_msgs::action::GoToPose>::SharedPtr pose_action_server;
+                rclcpp::Time start_time_;
+
+                rclcpp_action::GoalResponse handle_goal(const rclcpp_action::GoalUUID & /*uuid*/, std::shared_ptr<const robot_msgs::action::GoToPose::Goal> /*goal*/) {
+                        if (active_goal_pose_) {
+                                RCLCPP_WARN(get_logger(), "Goal pose rejected : already going somewhere");
+                                return rclcpp_action::GoalResponse::REJECT;
+                        }
+                        RCLCPP_INFO(get_logger(), "Goal pose received");
+                        return rclcpp_action::GoalResponse::ACCEPT_AND_EXECUTE;
+                }
+
+                rclcpp_action::CancelResponse handle_cancel(const std::shared_ptr<rclcpp_action::ServerGoalHandle<robot_msgs::action::GoToPose>> /*goal_handle*/) {
+                        RCLCPP_INFO(get_logger(), "Cancel goal pose requested");
+                        return rclcpp_action::CancelResponse::ACCEPT;
+                }
+
+                void handle_accepted(const std::shared_ptr<rclcpp_action::ServerGoalHandle<robot_msgs::action::GoToPose>> goal_handle) {
+                        active_goal_pose_ = goal_handle;
+                        
+                        const auto goal = goal_handle->get_goal();
+                        x_goal = goal->x;
+                        y_goal = goal->y;
+                        theta_goal = goal->theta;
+
+                        create_trajectory();
+                        goal_active = true;
+                        start_time_ = now();
+
+                        RCLCPP_INFO(this->get_logger(), "Nouvel objectif : (%.3f, %.3f, %.1f°), trajectoire de %.3f m en %.2f s", x_goal, y_goal, theta_goal*180/M_PI, longueur_trajectoire, duree_trajectoire);
+                }
+
                 rclcpp::Publisher<std_msgs::msg::Float64>::SharedPtr cmd_vel_wheel1_pub_;
                 rclcpp::Publisher<std_msgs::msg::Float64>::SharedPtr cmd_vel_wheel2_pub_;
                 rclcpp::Publisher<std_msgs::msg::Float64>::SharedPtr cmd_vel_wheel3_pub_;
@@ -112,6 +151,31 @@ class RobotControl : public rclcpp::Node{
 
                 float Kp = 2.0;
                 float Kp_theta = 1.0;
+
+
+                // ---------- Phase finale : contrôleur PI de positionnement ----------
+                float Kp_final = 1.5;                 // (1/s)
+                float Ki_final = 0.8;                 // (1/s²)
+                float Kp_theta_final = 2.0;           // (1/s)
+                float Ki_theta_final = 0.5;           // (1/s²)
+
+                float integrale_max = 0.05;           // borne anti-windup position (m·s)
+                float integrale_theta_max = 0.2;      // borne anti-windup cap (rad·s)
+
+                float v_max_final = 0.1;              // (m/s)
+                float omega_max_final = 1.0;          // (rad/s)
+
+                float tolerance_position = 0.005;     // 5 mm
+                float tolerance_theta = 0.01;         // ~0.6°
+                int nb_cycles_stabilisation = 10;     // 10 x 20 ms = 0.2 s dans la tolérance
+                float timeout_phase_finale = 5.0;     // (s) sécurité si l'objectif n'est jamais atteint
+
+                bool phase_finale = false;
+                double t_debut_phase_finale = 0;
+                double t_precedent_pi = 0;
+                float integrale_x = 0, integrale_y = 0, integrale_theta = 0;
+                int compteur_stabilisation = 0;
+                // ---------------------------------------------------------------------
 
 
                 bool position_received = false;
@@ -278,18 +342,6 @@ class RobotControl : public rclcpp::Node{
 
 
                 rclcpp::Publisher<nav_msgs::msg::Path>::SharedPtr path_pub_;
-                rclcpp::Subscription<geometry_msgs::msg::PoseStamped>::SharedPtr goal_sub_;
-                void goal_callback(const geometry_msgs::msg::PoseStamped::SharedPtr goal){
-                        x_goal = goal->pose.position.x;
-                        y_goal = goal->pose.position.y;
-                        theta_goal = 2*atan2(goal->pose.orientation.z, goal->pose.orientation.w);
-
-                        create_trajectory();
-                        goal_active = true;
-
-                        RCLCPP_INFO(this->get_logger(), "Nouvel objectif : (%.3f, %.3f, %.1f°), trajectoire de %.3f m en %.2f s", x_goal, y_goal, theta_goal*180/M_PI, longueur_trajectoire, duree_trajectoire);
-                }
-
 
                 rclcpp::TimerBase::SharedPtr trajectory_generation_timer;
                 void trajectory_generation_loop(){
@@ -333,8 +385,19 @@ class RobotControl : public rclcpp::Node{
 
                 void create_trajectory(){
                         u=0;
+                        phase_finale = false; // un nouvel objectif / une replanification annule la phase finale en cours
 
                         float distance = sqrt((x_goal - x)*(x_goal - x) + (y_goal - y)*(y_goal - y));
+
+                        // Objectif quasiment sur place (ex : rotation pure) : pas de spline,
+                        // on laisse directement le PI final faire le travail (évite aussi la division par 0).
+                        if (distance < 1e-3){
+                                trajectoire_active = false;
+                                longueur_trajectoire = 0;
+                                duree_trajectoire = 0;
+                                return;
+                        }
+
                         float dir_x = (x_goal - x) / distance;
                         float dir_y = (y_goal - y) / distance;
 
@@ -415,13 +478,17 @@ class RobotControl : public rclcpp::Node{
                 void trajectory_control_loop(){
                         if (!position_received || !goal_active) return;
 
+                        // Phase finale : on ne suit plus le temps, on asservit directement sur l'objectif
+                        if (phase_finale){
+                                controle_final();
+                                return;
+                        }
+
                         // 1. temps écoulé depuis le départ (horloge de la simulation si use_sim_time = true)
                         float t = this->now().seconds() - t_debut_trajectoire;
-                        if (t >= duree_trajectoire){
-                                trajectoire_active = false;
-                                RCLCPP_INFO(this->get_logger(), "Fin de trajectoire, objectif atteint");
-                                goal_active = false;
-                                send_robot_speed(0.0, 0.0, 0.0);
+                        if (!trajectoire_active || t >= duree_trajectoire){
+                                demarrer_phase_finale();
+                                controle_final();
                                 return;
                         }
 
@@ -454,8 +521,101 @@ class RobotControl : public rclcpp::Node{
                                 vy_table = vy_table * v_max_trajectoire / vitesse;
                         }
                         omega = std::clamp(omega, -v_angulaire_max_trajectire, v_angulaire_max_trajectire);
+                        
+
+                        auto feedback = std::make_shared<robot_msgs::action::GoToPose::Feedback>();
+                        feedback->elapsed = (now() - start_time_).seconds();
+                        feedback->message = "Following trajectory";
+                        active_goal_pose_->publish_feedback(feedback);
+
 
                         send_robot_speed(vx_table, vy_table, omega);
+                }
+
+                void demarrer_phase_finale(){
+                        phase_finale = true;
+                        trajectoire_active = false;
+
+                        integrale_x = 0;
+                        integrale_y = 0;
+                        integrale_theta = 0;
+                        compteur_stabilisation = 0;
+
+                        t_debut_phase_finale = this->now().seconds();
+                        t_precedent_pi = t_debut_phase_finale;
+
+                        RCLCPP_INFO(this->get_logger(), "Fin de trajectoire, passage en asservissement PI final");
+                }
+
+                void controle_final(){
+                        double maintenant = this->now().seconds();
+                        float dt = std::clamp((float)(maintenant - t_precedent_pi), 0.0f, 0.1f); // borné en cas de saut d'horloge
+                        t_precedent_pi = maintenant;
+
+                        // erreurs dans le repère table
+                        float ex = x_goal - x;
+                        float ey = y_goal - y;
+                        float etheta = wrap(theta_goal - theta);
+                        float erreur_position = sqrt(ex*ex + ey*ey);
+
+                        // condition d'arrivée : rester dans la tolérance pendant plusieurs cycles
+                        if (erreur_position < tolerance_position && fabs(etheta) < tolerance_theta){
+                                compteur_stabilisation++;
+                        } else {
+                                compteur_stabilisation = 0;
+                        }
+
+                        if (compteur_stabilisation >= nb_cycles_stabilisation){
+                                RCLCPP_INFO(this->get_logger(), "Objectif atteint (erreur %.1f mm, %.2f°)", erreur_position*1000, etheta*180/M_PI);
+                                terminer_objectif();
+                                return;
+                        }
+
+                        if (maintenant - t_debut_phase_finale > timeout_phase_finale){
+                                RCLCPP_WARN(this->get_logger(), "Timeout phase finale : arrêt avec une erreur de %.1f mm, %.2f°", erreur_position*1000, etheta*180/M_PI);
+                                terminer_objectif();
+                                return;
+                        }
+
+                        // intégrales avec anti-windup par saturation
+                        integrale_x = std::clamp(integrale_x + ex*dt, -integrale_max, integrale_max);
+                        integrale_y = std::clamp(integrale_y + ey*dt, -integrale_max, integrale_max);
+                        integrale_theta = std::clamp(integrale_theta + etheta*dt, -integrale_theta_max, integrale_theta_max);
+
+                        // loi PI
+                        float vx_table = Kp_final*ex + Ki_final*integrale_x;
+                        float vy_table = Kp_final*ey + Ki_final*integrale_y;
+                        float omega = Kp_theta_final*etheta + Ki_theta_final*integrale_theta;
+
+                        // saturations (même direction conservée pour la translation)
+                        float vitesse = sqrt(vx_table*vx_table + vy_table*vy_table);
+                        if (vitesse > v_max_final){
+                                vx_table = vx_table * v_max_final / vitesse;
+                                vy_table = vy_table * v_max_final / vitesse;
+                        }
+                        omega = std::clamp(omega, -omega_max_final, omega_max_final);
+
+
+                        auto feedback = std::make_shared<robot_msgs::action::GoToPose::Feedback>();
+                        feedback->elapsed = (now() - start_time_).seconds();
+                        feedback->message = "Following PI";
+                        active_goal_pose_->publish_feedback(feedback);
+
+
+                        send_robot_speed(vx_table, vy_table, omega);
+                }
+
+                void terminer_objectif(){
+                        phase_finale = false;
+                        trajectoire_active = false;
+                        goal_active = false;
+                        send_robot_speed(0.0, 0.0, 0.0);
+
+                        auto result = std::make_shared<robot_msgs::action::GoToPose::Result>();
+                        result->message="Fin de la trajectoire";
+                        result->success=true;
+                        active_goal_pose_->succeed(result);
+                        active_goal_pose_.reset();
                 }
 
                 void send_robot_speed(float vx_table, float vy_table, float omega){

@@ -19,6 +19,7 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/WheelCommands.msg"
   "msg/RobotSpeed.msg"
   "action/RockCentering.action"
+  "action/GoToPose.action"
   DEPENDENCIES std_msgs action_msgs
  )
 
