@@ -23,7 +23,7 @@ find_package(tf2_ros REQUIRED)
 
 add_executable(robot_control src/robot_control.cpp)
 target_include_directories(robot_control PRIVATE ${EIGEN3_INCLUDE_DIR})
-ament_target_dependencies(robot_control rclcpp std_msgs robot_msgs geometry_msgs sensor_msgs nav_msgs visualization_msgs)
+ament_target_dependencies(robot_control rclcpp std_msgs robot_msgs geometry_msgs sensor_msgs nav_msgs visualization_msgs rclcpp_action)
 
 add_executable(beacon_localization src/beacon_localization.cpp)
 target_include_directories(beacon_localization PRIVATE ${EIGEN3_INCLUDE_DIR})
