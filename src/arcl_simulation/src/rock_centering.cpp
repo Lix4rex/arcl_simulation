@@ -17,19 +17,17 @@ using namespace std::chrono_literals;
 class RockCentering : public rclcpp::Node {
     public:
         RockCentering() : Node("rock_centering") {
-            using std::placeholders::_1;
-            using std::placeholders::_2;
 
             aruco_markers_sub_ = create_subscription<ros2_aruco_interfaces::msg::ArucoMarkers>(
                 "/aruco_markers", 10,
-                std::bind(&RockCentering::aruco_markers_callback, this, _1)
+                std::bind(&RockCentering::aruco_markers_callback, this, std::placeholders::_1)
             );
 
             action_server_ = rclcpp_action::create_server<robot_msgs::action::RockCentering>(
                 this, "/rock_centering",
-                std::bind(&RockCentering::handle_goal, this, _1, _2),
-                std::bind(&RockCentering::handle_cancel, this, _1),
-                std::bind(&RockCentering::handle_accepted, this, _1)
+                std::bind(&RockCentering::handle_goal, this, std::placeholders::_1, std::placeholders::_2),
+                std::bind(&RockCentering::handle_cancel, this, std::placeholders::_1),
+                std::bind(&RockCentering::handle_accepted, this, std::placeholders::_1)
             );
 
             robot_speed_pub_ = create_publisher<robot_msgs::msg::RobotSpeed>("/speed_command", 10);

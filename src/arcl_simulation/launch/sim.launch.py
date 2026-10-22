@@ -99,7 +99,7 @@ def generate_launch_description():
         get_package_share_directory('ros2_aruco'),
         'config',
         'aruco_parameters.yaml'
-        )
+    )
 
     aruco_node = Node(
         package='ros2_aruco',
@@ -120,5 +120,5 @@ def generate_launch_description():
         robot_control, rock_centering, table_markers,ventouse_service,
         wheel_odometry, otos_simulator, ekf_odom, beacon_localization,
         aruco_node,
-        #command_interface
+        command_interface
     ])

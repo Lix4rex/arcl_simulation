@@ -44,7 +44,7 @@ public:
     timeout_ = duree(declare_parameter("operation_timeout_sec", 2.0), "operation_timeout_sec");
     delai_lacher_ = duree(declare_parameter("delai_lacher", 1.2), "delai_lacher");
     duree_poignet_ = duree(declare_parameter("duree_poignet", 1.5), "duree_poignet");
-    hauteur_ = declare_parameter("hauteur", 0.095);
+    hauteur_ = declare_parameter("hauteur", 0.05);
     hauteur_rotation_ = declare_parameter("hauteur_rotation", 0.12);
     duree_montee_ = duree(declare_parameter("duree_montee", 0.4), "duree_montee");
     angle_poignet_ = declare_parameter("angle_poignet", 1.5708);

@@ -91,6 +91,16 @@ class ArucoNode(rclpy.node.Node):
             ),
         )
 
+        self.declare_parameter(
+            name="poses_topic",
+            value="aruco_poses"
+        )
+
+        self.declare_parameter(
+            name="markers_topic",
+            value="aruco_markers"
+        )
+
         self.marker_size = (
             self.get_parameter("marker_size").get_parameter_value().double_value
         )
@@ -115,6 +125,16 @@ class ArucoNode(rclpy.node.Node):
             self.get_parameter("camera_frame").get_parameter_value().string_value
         )
 
+        self.poses_topic = (
+            self.get_parameter("poses_topic").get_parameter_value().string_value
+        )
+        self.get_logger().info(f"Poses topic: {self.poses_topic}")
+
+        self.markers_topic = (
+            self.get_parameter("markers_topic").get_parameter_value().string_value
+        )
+        self.get_logger().info(f"Markers topic: {self.markers_topic}")
+
         # Make sure we have a valid dictionary id:
         try:
             dictionary_id = cv2.aruco.__getattribute__(dictionary_id_name)
@@ -137,8 +157,8 @@ class ArucoNode(rclpy.node.Node):
         )
 
         # Set up publishers
-        self.poses_pub = self.create_publisher(PoseArray, "aruco_poses", 10)
-        self.markers_pub = self.create_publisher(ArucoMarkers, "aruco_markers", 10)
+        self.poses_pub = self.create_publisher(PoseArray, self.poses_topic, 10)
+        self.markers_pub = self.create_publisher(ArucoMarkers, self.markers_topic, 10)
 
         # Set up fields for camera parameters
         self.info_msg = None

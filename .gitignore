@@ -2,6 +2,7 @@ build
 install
 log
 site
+
 core
 
 .vscode
@@ -9,3 +10,5 @@ core
 /.devcontainer/Dockerfile
 
 __pycache__
+
+testcam

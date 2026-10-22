@@ -1,0 +1,8 @@
+/aruco_node:
+  ros__parameters:
+    marker_size: 0.07
+    aruco_dictionary_id: DICT_4X4_50
+    image_topic: /deported_camera/image
+    camera_info_topic: /deported_camera/camera_info
+    poses_topic: /deported_aruco_poses
+    markers_topic: /deported_aruco_markers
