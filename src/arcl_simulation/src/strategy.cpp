@@ -110,7 +110,7 @@ class Strategy : public rclcpp::Node{
             // Exemple : carrière bord_nord_1 -> mur_nord, puis retour en salle du trône.
             // Poses calculées comme dans strategie_camelot.py (centre robot à 0.222 m de l'axe des pierres,
             // approche / dégagement 10 cm plus loin). Attention : ici pas d'A*, go_to_pose va en ligne droite.
-            std::list<Action> actions = {
+            /*std::list<Action> actions = {
                 {State::IDLE, 0.0, 0.0, 0.0, 0, 0},
                 {State::ROTATION_VENTOUSE, 0.0, 0.0, 0.0, 0, 0},     // poignet à 0° (pierres couchées)
                 {State::MOVE_TO, 0.75, 1.621, 90.0, 0, 0},           // approche carrière bord_nord_1
@@ -124,7 +124,118 @@ class Strategy : public rclcpp::Node{
                 {State::MOVE_TO, 0.25, 1.255, 90.0, 0, 0},           // dégagement
                 {State::MOVE_TO, 0.25, 1.00, 0.0, 0, 0},             // salle du trône
                 {State::FINISH, 0.0, 0.0, 0.0, 0, 0}
+            };*/
+
+                        std::list<Action> actions = {
+                {State::IDLE, 0.0, 0.0, 0.0, 0, 0},
+                {State::ROTATION_VENTOUSE, 0.0, 0.0, 0.0, 0, 0},   // poignet à 0° (pierres couchées)
+                {State::MOVE_TO, 0.750, 0.379, -90.0, 0, 0},       // vers carrière bord_sud_1
+                {State::CENTRAGE, 0.750, 0.057, 0.0, 0, 0},        // centrage sur bord_sud_1
+                {State::MOVE_TO, 0.750, 0.279, -90.0, 0, 0},       // contact carrière (remplacé si le centrage réussit)
+                {State::VENTOUSE, 0.0, 0.0, 0.0, 1, 0},            // prendre les 3 pierres
+                {State::MOVE_TO, 0.750, 0.379, -90.0, 0, 0},       // dégagement carrière
+                {State::MOVE_TO, 0.230, 0.747, -90.0, 0, 0},       // vers mur_sud
+                {State::MOVE_TO, 0.230, 0.647, -90.0, 0, 0},       // contact mur_sud
+                {State::VENTOUSE, 0.0, 0.0, 0.0, 0, 0},            // lâcher tout : mur_sud
+                {State::MOVE_TO, 0.230, 0.747, -90.0, 0, 0},       // dégagement
+                {State::MOVE_TO, 0.750, 1.621, 90.0, 0, 0},        // vers carrière bord_nord_1
+                {State::CENTRAGE, 0.750, 1.943, 0.0, 0, 0},        // centrage sur bord_nord_1
+                {State::MOVE_TO, 0.750, 1.721, 90.0, 0, 0},        // contact carrière (remplacé si le centrage réussit)
+                {State::VENTOUSE, 0.0, 0.0, 0.0, 1, 0},            // prendre les 3 pierres
+                {State::MOVE_TO, 0.750, 1.621, 90.0, 0, 0},        // dégagement carrière
+                {State::MOVE_TO, 0.806, 1.451, 135.0, 0, 0},       // vers tour_nord_ext
+                {State::ROTATION_VENTOUSE, 0.0, 0.0, 0.0, 1, 0},   // poignet à 90° (pierres debout)
+                {State::MOVE_TO, 0.735, 1.522, 135.0, 0, 0},       // contact tour_nord_ext
+                {State::VENTOUSE, 0.0, 0.0, 0.0, 0, 1},            // lâcher étage 1 : tour_nord_ext
+                {State::MOVE_TO, 0.806, 1.451, 135.0, 0, 0},       // dégagement
+                {State::MOVE_TO, 0.825, 1.425, 135.0, 0, 0},       // vers cour
+                {State::MOVE_TO, 0.950, 1.000, 146.2, 0, 0},       // vers cour
+                {State::MOVE_TO, 0.952, 1.000, 180.0, 0, 0},       // vers cour
+                {State::MOVE_TO, 0.852, 1.000, 180.0, 0, 0},       // contact cour
+                {State::VENTOUSE, 0.0, 0.0, 0.0, 0, 0},            // lâcher tout : cour
+                {State::MOVE_TO, 0.952, 1.000, 180.0, 0, 0},       // dégagement
+                {State::ROTATION_VENTOUSE, 0.0, 0.0, 0.0, 0, 0},   // poignet à 0° (pierres couchées)
+                {State::MOVE_TO, 1.200, 1.525, 90.0, 0, 0},        // vers carrière bord_nord_2
+                {State::MOVE_TO, 1.250, 1.621, 90.0, 0, 0},        // vers carrière bord_nord_2
+                {State::CENTRAGE, 1.250, 1.943, 0.0, 0, 0},        // centrage sur bord_nord_2
+                {State::MOVE_TO, 1.250, 1.721, 90.0, 0, 0},        // contact carrière (remplacé si le centrage réussit)
+                {State::VENTOUSE, 0.0, 0.0, 0.0, 1, 0},            // prendre les 3 pierres
+                {State::MOVE_TO, 1.250, 1.621, 90.0, 0, 0},        // dégagement carrière
+                {State::MOVE_TO, 1.156, 1.101, 135.0, 0, 0},       // vers tour_nord_int
+                {State::ROTATION_VENTOUSE, 0.0, 0.0, 0.0, 1, 0},   // poignet à 90° (pierres debout)
+                {State::MOVE_TO, 1.085, 1.172, 135.0, 0, 0},       // contact tour_nord_int
+                {State::VENTOUSE, 0.0, 0.0, 0.0, 0, 1},            // lâcher étage 1 : tour_nord_int
+                {State::MOVE_TO, 1.156, 1.101, 135.0, 0, 0},       // dégagement
+                {State::MOVE_TO, 1.175, 1.075, 135.0, 0, 0},       // vers tour_sud_ext
+                {State::MOVE_TO, 1.000, 0.825, 135.0, 0, 0},       // vers tour_sud_ext
+                {State::MOVE_TO, 0.800, 0.550, 157.5, 0, 0},       // vers tour_sud_ext
+                {State::MOVE_TO, 0.806, 0.549, -135.0, 0, 0},      // vers tour_sud_ext
+                {State::MOVE_TO, 0.735, 0.478, -135.0, 0, 0},      // contact tour_sud_ext
+                {State::VENTOUSE, 0.0, 0.0, 0.0, 0, 3},            // lâcher étage 3 : tour_sud_ext
+                {State::MOVE_TO, 0.806, 0.549, -135.0, 0, 0},      // dégagement
+                {State::MOVE_TO, 0.825, 0.575, -135.0, 0, 0},      // vers tour_sud_int
+                {State::MOVE_TO, 1.000, 0.575, -146.3, 0, 0},      // vers tour_sud_int
+                {State::MOVE_TO, 1.078, 0.522, 135.0, 0, 0},       // vers tour_sud_int
+                {State::MOVE_TO, 1.007, 0.593, 135.0, 0, 0},       // contact tour_sud_int
+                {State::VENTOUSE, 0.0, 0.0, 0.0, 0, 2},            // lâcher étage 2 : tour_sud_int
+                {State::MOVE_TO, 1.078, 0.522, 135.0, 0, 0},       // dégagement
+                {State::ROTATION_VENTOUSE, 0.0, 0.0, 0.0, 0, 0},   // poignet à 0° (pierres couchées)
+                {State::MOVE_TO, 1.200, 0.400, -101.3, 0, 0},      // vers carrière bord_sud_2
+                {State::MOVE_TO, 1.250, 0.379, -90.0, 0, 0},       // vers carrière bord_sud_2
+                {State::CENTRAGE, 1.250, 0.057, 0.0, 0, 0},        // centrage sur bord_sud_2
+                {State::MOVE_TO, 1.250, 0.279, -90.0, 0, 0},       // contact carrière (remplacé si le centrage réussit)
+                {State::VENTOUSE, 0.0, 0.0, 0.0, 1, 0},            // prendre les 3 pierres
+                {State::MOVE_TO, 1.250, 0.379, -90.0, 0, 0},       // dégagement carrière
+                {State::MOVE_TO, 0.850, 0.425, -45.0, 0, 0},       // vers mur_nord
+                {State::MOVE_TO, 0.550, 0.700, -45.0, 0, 0},       // vers mur_nord
+                {State::MOVE_TO, 0.325, 0.925, -45.0, 0, 0},       // vers mur_nord
+                {State::MOVE_TO, 0.300, 0.925, -45.0, 0, 0},       // vers mur_nord
+                {State::MOVE_TO, 0.225, 1.000, -45.0, 0, 0},       // vers mur_nord
+                {State::MOVE_TO, 0.230, 1.253, 90.0, 0, 0},        // vers mur_nord
+                {State::MOVE_TO, 0.230, 1.353, 90.0, 0, 0},        // contact mur_nord
+                {State::VENTOUSE, 0.0, 0.0, 0.0, 0, 0},            // lâcher tout : mur_nord
+                {State::MOVE_TO, 0.230, 1.253, 90.0, 0, 0},        // dégagement
+                {State::MOVE_TO, 0.350, 0.875, -33.8, 0, 0},       // vers carrière centre_nord
+                {State::MOVE_TO, 0.625, 0.600, -33.8, 0, 0},       // vers carrière centre_nord
+                {State::MOVE_TO, 0.650, 0.600, -33.8, 0, 0},       // vers carrière centre_nord
+                {State::MOVE_TO, 0.700, 0.550, -33.8, 0, 0},       // vers carrière centre_nord
+                {State::MOVE_TO, 0.850, 0.450, -33.8, 0, 0},       // vers carrière centre_nord
+                {State::MOVE_TO, 0.900, 0.450, -33.8, 0, 0},       // vers carrière centre_nord
+                {State::MOVE_TO, 1.050, 0.600, -33.8, 0, 0},       // vers carrière centre_nord
+                {State::MOVE_TO, 1.150, 0.750, -33.8, 0, 0},       // vers carrière centre_nord
+                {State::MOVE_TO, 1.178, 1.495, 0.0, 0, 0},         // vers carrière centre_nord
+                {State::CENTRAGE, 1.500, 1.495, 0.0, 0, 0},        // centrage sur centre_nord
+                {State::MOVE_TO, 1.278, 1.495, 0.0, 0, 0},         // contact carrière (remplacé si le centrage réussit)
+                {State::VENTOUSE, 0.0, 0.0, 0.0, 1, 0},            // prendre les 3 pierres
+                {State::MOVE_TO, 1.178, 1.495, 0.0, 0, 0},         // dégagement carrière
+                {State::MOVE_TO, 0.975, 1.650, -112.5, 0, 0},      // vers mur_aruco_nord
+                {State::MOVE_TO, 0.925, 1.675, -135.0, 0, 0},      // vers mur_aruco_nord
+                {State::MOVE_TO, 0.903, 1.653, -135.0, 0, 0},      // vers mur_aruco_nord
+                {State::MOVE_TO, 0.832, 1.582, -135.0, 0, 0},      // contact mur_aruco_nord
+                {State::VENTOUSE, 0.0, 0.0, 0.0, 0, 0},            // lâcher tout : mur_aruco_nord
+                {State::MOVE_TO, 0.903, 1.653, -135.0, 0, 0},      // dégagement
+                {State::MOVE_TO, 1.150, 1.325, 0.0, 0, 0},         // vers carrière centre_sud
+                {State::MOVE_TO, 1.178, 0.505, 0.0, 0, 0},         // vers carrière centre_sud
+                {State::CENTRAGE, 1.500, 0.505, 0.0, 0, 0},        // centrage sur centre_sud
+                {State::MOVE_TO, 1.278, 0.505, 0.0, 0, 0},         // contact carrière (remplacé si le centrage réussit)
+                {State::VENTOUSE, 0.0, 0.0, 0.0, 1, 0},            // prendre les 3 pierres
+                {State::MOVE_TO, 1.178, 0.505, 0.0, 0, 0},         // dégagement carrière
+                {State::MOVE_TO, 0.875, 0.475, -11.3, 0, 0},       // vers mur_aruco_sud
+                {State::MOVE_TO, 0.825, 0.475, -22.5, 0, 0},       // vers mur_aruco_sud
+                {State::MOVE_TO, 0.800, 0.475, -33.8, 0, 0},       // vers mur_aruco_sud
+                {State::MOVE_TO, 0.725, 0.550, -45.0, 0, 0},       // vers mur_aruco_sud
+                {State::MOVE_TO, 0.550, 0.700, -45.0, 0, 0},       // vers mur_aruco_sud
+                {State::MOVE_TO, 0.447, 0.803, -45.0, 0, 0},       // vers mur_aruco_sud
+                {State::MOVE_TO, 0.518, 0.732, -45.0, 0, 0},       // contact mur_aruco_sud
+                {State::VENTOUSE, 0.0, 0.0, 0.0, 0, 0},            // lâcher tout : mur_aruco_sud
+                {State::MOVE_TO, 0.447, 0.803, -45.0, 0, 0},       // dégagement
+                {State::MOVE_TO, 0.325, 0.925, -45.0, 0, 0},       // retour salle du trône
+                {State::MOVE_TO, 0.250, 1.000, 0.0, 0, 0},         // retour salle du trône
+                {State::FINISH, 0.0, 0.0, 0.0, 0, 0}
             };
+
+
+
 
             rclcpp_action::Client<GoToPose>::SharedPtr move_to_client_ptr;
             rclcpp_action::Client<RockCentering>::SharedPtr centrage_client_ptr;

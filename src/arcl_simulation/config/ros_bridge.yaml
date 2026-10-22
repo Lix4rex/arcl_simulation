@@ -58,6 +58,16 @@
   ros_type_name: sensor_msgs/msg/CameraInfo
   gz_type_name: gz.msgs.CameraInfo
   direction: GZ_TO_ROS
+- ros_topic_name: /deported_camera/image
+  gz_topic_name: /deported_camera/image
+  ros_type_name: sensor_msgs/msg/Image
+  gz_type_name: gz.msgs.Image
+  direction: GZ_TO_ROS
+- ros_topic_name: /deported_camera/camera_info
+  gz_topic_name: /deported_camera/camera_info
+  ros_type_name: sensor_msgs/msg/CameraInfo
+  gz_type_name: gz.msgs.CameraInfo
+  direction: GZ_TO_ROS
 - ros_topic_name: /robot_omni/ventouse_1/commande
   gz_topic_name: /robot_omni/ventouse_1/commande
   ros_type_name: std_msgs/msg/String

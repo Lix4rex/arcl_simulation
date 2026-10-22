@@ -1,6 +1,6 @@
 Panels:
   - Class: rviz_common/Displays
-    Help Height: 70
+    Help Height: 0
     Name: Displays
     Property Tree Widget:
       Expanded:
@@ -8,7 +8,7 @@ Panels:
         - /Pose vraie1/Shape1
         - /PoseArray1
       Splitter Ratio: 0.5
-    Tree Height: 230
+    Tree Height: 219
   - Class: rviz_common/Views
     Expanded:
       - /Current View1
@@ -35,6 +35,11 @@ Visualization Manager:
         Expand Link Details: false
         Expand Tree: false
         Link Tree Style: Links in Alphabetic Order
+        ascenseur:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
         base_link:
           Alpha: 1
           Show Axes: false
@@ -57,6 +62,11 @@ Visualization Manager:
           Show Axes: false
           Show Trail: false
         lidar:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        poignet:
           Alpha: 1
           Show Axes: false
           Show Trail: false
@@ -96,6 +106,8 @@ Visualization Manager:
       Frame Timeout: 15
       Frames:
         All Enabled: true
+        ascenseur:
+          Value: true
         base_link:
           Value: true
         base_link_vrai:
@@ -113,6 +125,8 @@ Visualization Manager:
         map:
           Value: true
         odom:
+          Value: true
+        poignet:
           Value: true
         roue_1:
           Value: true
@@ -137,7 +151,9 @@ Visualization Manager:
                 camera_optical:
                   {}
               chassis:
-                {}
+                ascenseur:
+                  poignet:
+                    {}
               imu:
                 {}
               lidar:
@@ -337,7 +353,7 @@ Visualization Manager:
       Enabled: true
       Name: Marker
       Namespaces:
-        {}
+        obstacles: true
       Topic:
         Depth: 5
         Durability Policy: Volatile
@@ -381,6 +397,20 @@ Visualization Manager:
         Reliability Policy: Reliable
         Value: /aruco_poses
       Value: true
+    - Class: rviz_default_plugins/Image
+      Enabled: true
+      Max Value: 1
+      Median window: 5
+      Min Value: 0
+      Name: Image
+      Normalize Range: true
+      Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /deported_camera/image
+      Value: true
   Enabled: true
   Global Options:
     Background Color: 48; 48; 48
@@ -406,7 +436,7 @@ Visualization Manager:
   Views:
     Current:
       Class: rviz_default_plugins/Orbit
-      Distance: 1.418271541595459
+      Distance: 3.1353461742401123
       Enable Stereo Rendering:
         Stereo Eye Separation: 0.05999999865889549
         Stereo Focal Distance: 1
@@ -434,9 +464,9 @@ Window Geometry:
   Hide Right Dock: false
   Image:
     collapsed: false
-  QMainWindow State: 000000ff00000000fd00000001000000000000019b0000039dfc0200000003fb000000100044006900730070006c006100790073010000003b00000167000000c700fffffffb0000000a0049006d00610067006501000001a8000002300000001600fffffffb0000000a005600690065007700730000000271000000a0000000a000ffffff000003f50000039d00000004000000040000000800000008fc0000000100000002000000010000000a0054006f006f006c00730100000000ffffffff0000000000000000
+  QMainWindow State: 000000ff00000000fd00000001000000000000019b0000039dfc0200000005fb000000100044006900730070006c006100790073010000003b00000116000000c700fffffffb0000000a0049006d0061006700650100000157000001190000001600fffffffb0000000a005600690065007700730000000271000000a0000000a000fffffffb0000000c00430061006d006500720061010000030d000000cb0000000000000000fb0000000a0049006d0061006700650100000276000001620000001600ffffff000003f50000039d00000004000000040000000800000008fc0000000100000002000000010000000a0054006f006f006c00730100000000ffffffff0000000000000000
   Views:
     collapsed: false
   Width: 1430
-  X: 490
-  Y: 32
+  X: 817
+  Y: 58
