@@ -1,4 +1,4 @@
-"""Asynchronous ROS topic/service client for the hybrid robot policy."""
+"""Asynchronous ROS action/service client for the hybrid robot policy."""
 
 from __future__ import annotations
 
@@ -34,8 +34,9 @@ class ActionExecutor:
         self._executor: Any = None
         self._spin_thread: threading.Thread | None = None
         self._owns_rclpy = False
-        self._goal_publisher: Any = None
+        self._move_client: Any = None
         self._suction_clients: dict[int, Any] = {}
+        self._suction_all_client: Any = None
         self._wrist_client: Any = None
         self._last_world: dict[str, Any] | None = None
 
@@ -45,7 +46,8 @@ class ActionExecutor:
         import rclpy
         from rclpy.executors import MultiThreadedExecutor
         from rclpy.node import Node
-        from geometry_msgs.msg import PoseStamped
+        from rclpy.action import ActionClient
+        from robot_msgs.action import GoToPose
         from std_srvs.srv import SetBool
 
         self._rclpy = rclpy
@@ -53,11 +55,12 @@ class ActionExecutor:
             rclpy.init(args=None)
             self._owns_rclpy = True
         self._node = Node("arcl_agent_executor")
-        self._goal_publisher = self._node.create_publisher(PoseStamped, "/goal_pose", 10)
+        self._move_client = ActionClient(self._node, GoToPose, "/go_to_pose")
         self._suction_clients = {
             index: self._node.create_client(SetBool, f"/robot_omni/ventouse_{index}/set")
             for index in range(1, 4)
         }
+        self._suction_all_client = self._node.create_client(SetBool, "/robot_omni/ventouse/set")
         self._wrist_client = self._node.create_client(SetBool, "/robot_omni/poignet/set")
         self._executor = MultiThreadedExecutor(num_threads=2)
         self._executor.add_node(self._node)
@@ -67,13 +70,14 @@ class ActionExecutor:
     def observation(self) -> dict[str, Any] | None:
         if self.active is None:
             return None
+        started_at = self.active.get("started_at", time.monotonic())
         return {
             key: self.active.get(key) for key in (
-                "id", "type", "target_pose", "cancel_target_pose", "status", "cancelable", "reason",
+                "id", "type", "target_pose", "status", "cancelable", "reason",
                 "started_sequence", "failed",
             )
         } | {
-            "elapsed_s": max(0.0, time.monotonic() - self.active["started_at"]),
+            "elapsed_s": max(0.0, time.monotonic() - started_at),
             "timeout_s": self.navigation_timeout_s if self.active["type"] == "MOVE" else self.command_timeout_s,
         }
 
@@ -129,17 +133,11 @@ class ActionExecutor:
                 return {"status": "rejected", "reason": "there is no cancelable move"}
             if self.active["status"] in ("cancel_requested", "canceling", "unknown"):
                 return {"status": "waiting", "active_operation": self.observation()}
-            try:
-                cancel_target = self._publish_cancel_goal(world)
-            except (KeyError, TypeError, ValueError, RuntimeError) as error:
-                return {"status": "rejected", "reason": str(error)}
-            self.active["status"] = "canceling"
-            self.active["cancelable"] = False
-            self.active["cancel_target_pose"] = cancel_target
-            self.active["settled_since"] = None
-            self.active["settled_updates"] = 0
-            self.active["reason"] = "move goal replaced with a short stop target; awaiting pose and velocity confirmation"
-            return {"status": "canceling", "operation": self.observation()}
+            self.active["cancel_requested"] = True
+            self.active["status"] = "cancel_requested"
+            self.active["reason"] = "waiting for /go_to_pose cancellation and terminal result"
+            self._request_move_cancel(self.active)
+            return {"status": "cancel_requested", "operation": self.observation()}
         if self.active is not None:
             return {"status": "rejected", "reason": f"{self.active['type']} is still {self.active['status']}",
                     "active_operation": self.observation()}
@@ -175,14 +173,21 @@ class ActionExecutor:
         }
         self.active = operation
         if is_move:
+            from robot_msgs.action import GoToPose
+
+            if not self._move_client.server_is_ready():
+                self._finish("failed", "/go_to_pose action server is unavailable", world)
+                return {"status": "failed", "reason": self.last_result["reason"]}
+            target = decision["target_pose"]
+            goal = GoToPose.Goal()
+            goal.x, goal.y = float(target["x"]), float(target["y"])
+            goal.theta = math.atan2(target["sin"], target["cos"])
             try:
-                self._publish_goal(decision["target_pose"])
-            except (ImportError, RuntimeError, TypeError, ValueError) as error:
-                self._finish("failed", f"could not publish MOVE goal: {error}", world)
+                operation["goal_future"] = self._move_client.send_goal_async(goal)
+            except Exception as error:
+                self._finish("failed", f"could not send MOVE goal: {error}", world)
                 return {"status": "failed", "reason": str(error)}
-            operation["status"] = "running"
-            operation["reason"] = "goal published; waiting for fresh pose and stopped-velocity confirmation"
-            return {"status": "running", "operation": self.observation()}
+            return {"status": "issuing", "operation": self.observation()}
         operation["task"] = asyncio.create_task(self._run_operation(operation, decision, world))
         return {"status": "issuing", "operation": self.observation()}
 
@@ -216,6 +221,9 @@ class ActionExecutor:
             norm = math.hypot(sine, cosine)
             if norm < 1e-6:
                 raise ValueError("MOVE target orientation vector has near-zero norm")
+        elif action.startswith("SUCTION_ALL_"):
+            if action not in ("SUCTION_ALL_ON", "SUCTION_ALL_OFF"):
+                raise ValueError("invalid grouped suction action")
         elif action.startswith("SUCTION_"):
             try:
                 index, state = action.removeprefix("SUCTION_").split("_")
@@ -237,110 +245,68 @@ class ActionExecutor:
     async def _run_operation(self, operation: dict[str, Any], decision: dict[str, Any], world: dict[str, Any]) -> dict[str, Any]:
         return await self._run_service(operation, decision, world)
 
-    def _publish_goal(self, target: dict[str, Any]) -> None:
-        from geometry_msgs.msg import PoseStamped
-
-        goal = PoseStamped()
-        goal.header.frame_id = "map"
-        goal.header.stamp = self._node.get_clock().now().to_msg()
-        goal.pose.position.x = float(target["x"])
-        goal.pose.position.y = float(target["y"])
-        direction_norm = math.hypot(target["sin"], target["cos"])
-        yaw = math.atan2(target["sin"] / direction_norm, target["cos"] / direction_norm)
-        goal.pose.orientation.z = math.sin(yaw / 2.0)
-        goal.pose.orientation.w = math.cos(yaw / 2.0)
-        if self._goal_publisher is None:
-            raise RuntimeError("/goal_pose publisher is unavailable")
-        self._goal_publisher.publish(goal)
-
-    def _publish_cancel_goal(self, world: dict[str, Any]) -> dict[str, float]:
-        robot = world.get("robot") if isinstance(world.get("robot"), dict) else {}
-        pose = robot.get("pose")
-        sources = world.get("sources") if isinstance(world.get("sources"), dict) else {}
-        pose_source = sources.get("robot_pose") if isinstance(sources.get("robot_pose"), dict) else {}
-        age = _finite(robot.get("pose_age_s"), math.inf)
-        if (not isinstance(pose, dict) or pose_source.get("fresh", True) is not True
-                or age > self.pose_freshness_s
-                or not all(math.isfinite(_finite(pose.get(key), math.nan)) for key in ("x", "y", "yaw"))):
-            raise ValueError("CANCEL needs a fresh robot pose to replace the active /goal_pose")
-        arena = world.get("arena") if isinstance(world.get("arena"), dict) else {}
-        bounds = arena.get("bounds", arena)
-        if not isinstance(bounds, dict):
-            raise ValueError("CANCEL requires known arena bounds")
-        x_min = _finite(bounds.get("x_min"), 0.0) + self.robot_margin_m
-        x_max = _finite(bounds.get("x_max"), 3.0) - self.robot_margin_m
-        y_min = _finite(bounds.get("y_min"), 0.0) + self.robot_margin_m
-        y_max = _finite(bounds.get("y_max"), 2.0) - self.robot_margin_m
-        yaw = float(pose["yaw"])
-        distance = 0.02
-        candidates = (1.0, -1.0)
-        cancel_target = None
-        for direction in candidates:
-            x = float(pose["x"]) + direction * distance * math.cos(yaw)
-            y = float(pose["y"]) + direction * distance * math.sin(yaw)
-            if x_min <= x <= x_max and y_min <= y <= y_max:
-                cancel_target = {"x": x, "y": y, "sin": math.sin(yaw), "cos": math.cos(yaw)}
-                break
-        if cancel_target is None:
-            raise ValueError("CANCEL cannot find a safe short replacement target inside the map")
-        self._publish_goal(cancel_target)
-        return cancel_target
+    def _request_move_cancel(self, operation: dict[str, Any]) -> None:
+        handle = operation.get("goal_handle")
+        if handle is not None and "cancel_future" not in operation:
+            try:
+                operation["cancel_future"] = handle.cancel_goal_async()
+            except Exception as error:
+                operation["reason"] = f"could not request cancellation: {error}"
+                return
+            operation["status"] = "canceling"
+            operation["cancelable"] = False
 
     def _update_move(self, operation: dict[str, Any], world: dict[str, Any]) -> None:
-        now = time.monotonic()
-        if now - operation["started_at"] > self.navigation_timeout_s and operation["status"] != "unknown":
-            operation["status"] = "unknown"
-            operation["cancelable"] = False
-            operation["reason"] = "move timed out; /goal_pose has no terminal result interface"
-        robot = world.get("robot") if isinstance(world.get("robot"), dict) else {}
-        pose = robot.get("pose")
-        sources = world.get("sources") if isinstance(world.get("sources"), dict) else {}
-        pose_source = sources.get("robot_pose") if isinstance(sources.get("robot_pose"), dict) else {}
-        velocity_source = sources.get("velocity") if isinstance(sources.get("velocity"), dict) else {}
-        velocity = robot.get("velocity")
-        sequence = int(world.get("sequence", -1))
-        pose_age = _finite(robot.get("pose_age_s"), math.inf)
-        velocity_age = _finite(velocity_source.get("age_s"), math.inf)
-        if (sequence <= operation["started_sequence"] or not isinstance(pose, dict)
-                or pose_source.get("fresh", True) is not True or pose_age > self.pose_freshness_s
-                or not isinstance(velocity, dict) or velocity_source.get("fresh") is not True
-                or velocity_age > 0.5):
-            operation["settled_since"] = None
-            operation["settled_updates"] = 0
-            return
-        target = operation.get("cancel_target_pose") or operation["target_pose"]
         try:
-            position_error = math.hypot(float(target["x"]) - float(pose["x"]),
-                                        float(target["y"]) - float(pose["y"]))
-            target_yaw = math.atan2(float(target["sin"]), float(target["cos"]))
-            heading_error = abs(_wrap_angle(target_yaw - float(pose["yaw"])))
-            vx = _finite(velocity.get("x"), math.inf)
-            vy = _finite(velocity.get("y"), math.inf)
-            omega = _finite(velocity.get("yaw"), math.inf)
-        except (KeyError, TypeError, ValueError):
-            operation["settled_since"] = None
-            operation["settled_updates"] = 0
-            return
-        stopped = math.hypot(vx, vy) <= 0.02 and abs(omega) <= 0.05
-        if position_error <= 0.04 and heading_error <= 0.10 and stopped:
-            if operation.get("settled_since") is None:
-                operation["settled_since"] = now
-                operation["settled_updates"] = 0
-            operation["settled_updates"] += 1
-            if operation["settled_updates"] >= 5 and now - operation["settled_since"] >= 0.4:
-                canceled = operation.get("cancel_target_pose") is not None
-                self._finish("canceled" if canceled else "succeeded",
-                             "replacement goal reached and robot stopped" if canceled else
-                             "fresh pose reached target and robot stopped", world)
-        else:
-            operation["settled_since"] = None
-            operation["settled_updates"] = 0
+            future = operation.get("goal_future")
+            if future is not None and future.done() and "goal_handle" not in operation:
+                handle = future.result()
+                if not handle.accepted:
+                    self._finish("rejected", "/go_to_pose goal rejected", world)
+                    return
+                operation["goal_handle"] = handle
+                operation["result_future"] = handle.get_result_async()
+                if not operation.get("cancel_requested"):
+                    operation["status"] = "running"
+                    operation["reason"] = "/go_to_pose goal accepted; awaiting terminal result"
+            if operation.get("cancel_requested"):
+                self._request_move_cancel(operation)
+            cancel_future = operation.get("cancel_future")
+            if cancel_future is not None and cancel_future.done() and not operation.get("cancel_checked"):
+                operation["cancel_checked"] = True
+                if not cancel_future.result().goals_canceling:
+                    operation["reason"] = "cancellation rejected; awaiting original goal result"
+                    operation["status"] = "running"
+                    operation["cancelable"] = True
+                    operation["cancel_requested"] = False
+                    operation.pop("cancel_future")
+                    operation.pop("cancel_checked")
+            result_future = operation.get("result_future")
+            if result_future is not None and result_future.done():
+                response = result_future.result()
+                # action_msgs/GoalStatus: SUCCEEDED=4, CANCELED=5, ABORTED=6.
+                status = ("canceled" if response.status == 5 else
+                          "succeeded" if response.status == 4 and response.result.success else "failed")
+                self._finish(status, response.result.message or status, world)
+                return
+            if time.monotonic() - operation["started_at"] > self.navigation_timeout_s:
+                operation["cancel_requested"] = True
+                self._request_move_cancel(operation)
+                operation["status"] = "unknown"
+                operation["reason"] = "navigation timed out; cancellation requested; awaiting terminal result"
+        except Exception as error:
+            operation["status"] = "unknown"
+            operation["reason"] = f"MOVE outcome uncertain: {error}"
 
     async def _run_service(self, operation: dict[str, Any], decision: dict[str, Any], world: dict[str, Any]) -> dict[str, Any]:
         from std_srvs.srv import SetBool
 
         action = operation["type"]
-        if action.startswith("SUCTION_"):
+        if action in ("SUCTION_ALL_ON", "SUCTION_ALL_OFF"):
+            client = self._suction_all_client
+            request = SetBool.Request()
+            request.data = action.endswith("_ON")
+        elif action.startswith("SUCTION_"):
             index, state = action.removeprefix("SUCTION_").split("_")
             client = self._suction_clients[int(index)]
             request = SetBool.Request()
@@ -379,11 +345,12 @@ class ActionExecutor:
     async def close(self) -> None:
         operation = self.active
         if operation is not None and operation.get("type") == "MOVE":
-            try:
-                if self._last_world is not None:
-                    self._publish_cancel_goal(self._last_world)
-            except Exception:
-                pass
+            operation["cancel_requested"] = True
+            deadline = time.monotonic() + min(self.command_timeout_s, 2.0)
+            while self.active is not None and time.monotonic() < deadline:
+                self._update_move(operation, self._last_world or {"sequence": operation["started_sequence"]})
+                if self.active is not None:
+                    await asyncio.sleep(0.01)
         if self.active is not None:
             operation = self.active
             task = operation.get("task")
@@ -425,7 +392,3 @@ def _finite(value: Any, default: float = 0.0) -> float:
     except (TypeError, ValueError):
         return default
     return result if math.isfinite(result) else default
-
-
-def _wrap_angle(value: float) -> float:
-    return (value + math.pi) % (2.0 * math.pi) - math.pi

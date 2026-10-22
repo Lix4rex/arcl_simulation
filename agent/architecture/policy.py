@@ -10,15 +10,16 @@ import torch
 from torch import nn
 from torch.distributions import Categorical, Normal
 
-from .world_encoder import CONTEXT_SIZE, WorldEncoder
+from .actions import ACTIONS
+from .world_encoder import (
+    CONTEXT_SIZE,
+    LEGACY_OPERATION_TYPES,
+    WorldEncoder,
+)
 
 
 CHECKPOINT_FORMAT = "arcl-agent-policy-v1"
 DEFAULT_CHECKPOINT_PATH = Path(__file__).resolve().parents[2] / "checkpoints" / "policy.pt"
-ACTIONS = (
-    "IDLE", "CANCEL", "MOVE", "SUCTION_1_ON", "SUCTION_2_ON", "SUCTION_3_ON",
-    "SUCTION_1_OFF", "SUCTION_2_OFF", "SUCTION_3_OFF", "TOGGLE_WRIST",
-)
 LOG_STD_MIN = -5.0
 LOG_STD_MAX = 2.0
 DEFAULT_ROBOT_MARGIN_M = 0.20
@@ -67,6 +68,7 @@ class AgentPolicy:
             raise ValueError("robot_margin_m must be finite and non-negative")
         self.velocity_scale_m_s = float(velocity_scale_m_s)
         self.arena_bounds = tuple(float(value) for value in arena_bounds)
+        self.training_status = "untrained"
         self.network = PolicyNetwork(velocity_scale_m_s=self.velocity_scale_m_s,
                                      arena_bounds=self.arena_bounds).to(self.device)
 
@@ -75,6 +77,11 @@ class AgentPolicy:
         state_dict = checkpoint.get("state_dict", checkpoint) if isinstance(checkpoint, dict) else checkpoint
         if not isinstance(state_dict, dict):
             raise ValueError("checkpoint must contain a policy state dictionary")
+        state_dict = self._expand_legacy_state_dict(state_dict)
+        self.training_status = (
+            checkpoint.get("training_status", "untrained")
+            if isinstance(checkpoint, dict) else "untrained"
+        )
         configuration = checkpoint.get("observation_config") if isinstance(checkpoint, dict) else None
         if isinstance(configuration, dict):
             velocity_scale = _finite(configuration.get("velocity_scale_m_s"), math.nan)
@@ -90,6 +97,50 @@ class AgentPolicy:
                     self.network.encoder.arena_bounds = normalized_bounds
         self.network.load_state_dict(state_dict, strict=True)
         self.network.eval()
+
+    def _expand_legacy_state_dict(self, state_dict: dict[str, Any]) -> dict[str, Any]:
+        expected = self.network.state_dict()
+        expanded = dict(state_dict)
+        output_weight = "action_head.2.weight"
+        output_bias = "action_head.2.bias"
+        for key in (output_weight, output_bias):
+            old = expanded.get(key)
+            new = expected.get(key)
+            if (isinstance(old, torch.Tensor) and isinstance(new, torch.Tensor)
+                    and old.shape != new.shape and old.ndim == new.ndim
+                    and old.shape[0] == len(LEGACY_OPERATION_TYPES)
+                    and old.shape[1:] == new.shape[1:]):
+                value = new.detach().clone()
+                value[:old.shape[0]].copy_(old)
+                expanded[key] = value
+
+        old_encoder = WorldEncoder(
+            velocity_scale_m_s=self.velocity_scale_m_s,
+            arena_bounds=self.arena_bounds,
+            operation_types=LEGACY_OPERATION_TYPES,
+        )
+        old_context_names = old_encoder.feature_names["context"]
+        new_context_names = self.network.encoder.feature_names["context"]
+        for key, prefix_size in (
+            ("encoder.attention_query.0.weight", 32),
+            ("encoder.context_mlp.0.weight", 96),
+        ):
+            old = expanded.get(key)
+            new = expected.get(key)
+            if (not isinstance(old, torch.Tensor) or not isinstance(new, torch.Tensor)
+                    or old.shape == new.shape or old.ndim != 2 or new.ndim != 2
+                    or old.shape[0] != new.shape[0]
+                    or old.shape[1] != prefix_size + len(old_context_names)
+                    or new.shape[1] != prefix_size + len(new_context_names)):
+                continue
+            value = new.detach().clone()
+            value[:, :prefix_size].copy_(old[:, :prefix_size])
+            for old_index, feature_name in enumerate(old_context_names):
+                value[:, prefix_size + new_context_names.index(feature_name)].copy_(
+                    old[:, prefix_size + old_index]
+                )
+            expanded[key] = value
+        return expanded
 
     def load_or_create_checkpoint(self, path: str | Path) -> bool:
         checkpoint_path = Path(path)
@@ -108,6 +159,7 @@ class AgentPolicy:
                 "velocity_scale_m_s": self.velocity_scale_m_s,
                 "arena_bounds": list(self.arena_bounds),
             },
+            "training_status": self.training_status,
             "state_dict": self.network.state_dict(),
         }, checkpoint_path)
 
@@ -176,19 +228,24 @@ class AgentPolicy:
             raise ValueError("arena is too small for the configured robot margin")
         return x_min, x_max, y_min, y_max
 
-    def _decode_move(self, world: dict[str, Any], latent: torch.Tensor) -> dict[str, float]:
+    def decode_move_tensor(self, world: dict[str, Any], latent: torch.Tensor) -> torch.Tensor:
         x_min, x_max, y_min, y_max = self._move_bounds(world)
-        x = x_min + (x_max - x_min) * torch.sigmoid(latent[0])
-        y = y_min + (y_max - y_min) * torch.sigmoid(latent[1])
-        direction = latent[2:4]
-        norm = torch.linalg.vector_norm(direction)
-        if float(norm) < 1e-6:
-            robot = world.get("robot", {})
-            yaw = _finite(_object(robot.get("pose")).get("yaw"), 0.0)
-            sine, cosine = math.sin(yaw), math.cos(yaw)
-        else:
-            sine, cosine = (direction / norm).tolist()
-        yaw = math.atan2(sine, cosine)
+        x = x_min + (x_max - x_min) * torch.sigmoid(latent[..., 0])
+        y = y_min + (y_max - y_min) * torch.sigmoid(latent[..., 1])
+        direction = latent[..., 2:4]
+        norm = torch.linalg.vector_norm(direction, dim=-1, keepdim=True)
+        robot = world.get("robot") if isinstance(world.get("robot"), dict) else {}
+        pose = robot.get("pose") if isinstance(robot.get("pose"), dict) else {}
+        yaw = _finite(pose.get("yaw"), 0.0)
+        fallback = torch.tensor((math.sin(yaw), math.cos(yaw)), dtype=latent.dtype,
+                                device=latent.device).expand_as(direction)
+        normalized = direction / norm.clamp_min(1e-12)
+        direction = torch.where(norm < 1e-6, fallback, normalized)
+        return torch.stack((x, y, direction[..., 0], direction[..., 1]), dim=-1)
+
+    def _decode_move(self, world: dict[str, Any], latent: torch.Tensor) -> dict[str, float]:
+        decoded = self.decode_move_tensor(world, latent)
+        x, y, sine, cosine = decoded.tolist()
         return {"x": float(x), "y": float(y), "sin": float(sine), "cos": float(cosine)}
 
     def _evaluate_output(self, world: dict[str, Any], decision: dict[str, Any], output: dict[str, Any]) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
@@ -234,6 +291,7 @@ class AgentPolicy:
                 "sampled": not deterministic,
                 "log_prob": float(log_prob),
                 "value": float(value),
+                "action_probs": action_dist.probs.tolist(),
                 **({"move_latent": decision.pop("move_latent")} if action == "MOVE" else {}),
             }
         return decision

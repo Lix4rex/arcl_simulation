@@ -13,6 +13,11 @@ EMBEDDING_SIZE = 32
 CONTEXT_SIZE = 64
 ENTITY_GROUPS = ("cartons", "obstacles")
 OBSERVATION_VERSION = 2
+LEGACY_OPERATION_TYPES = (
+    "IDLE", "CANCEL", "MOVE", "SUCTION_1_ON", "SUCTION_2_ON", "SUCTION_3_ON",
+    "SUCTION_1_OFF", "SUCTION_2_OFF", "SUCTION_3_OFF", "TOGGLE_WRIST",
+)
+OPERATION_TYPES = (*LEGACY_OPERATION_TYPES, "SUCTION_ALL_ON", "SUCTION_ALL_OFF")
 
 
 def _object(value: Any) -> dict[str, Any]:
@@ -60,10 +65,12 @@ class WorldEncoder(nn.Module):
     """Encode map-frame robot state and unordered carton/obstacle sets."""
 
     def __init__(self, *, velocity_scale_m_s: float = 1.0,
-                 arena_bounds: tuple[float, float, float, float] = (0.0, 3.0, 0.0, 2.0)) -> None:
+                 arena_bounds: tuple[float, float, float, float] = (0.0, 3.0, 0.0, 2.0),
+                 operation_types: tuple[str, ...] = OPERATION_TYPES) -> None:
         super().__init__()
         self.velocity_scale_m_s = velocity_scale_m_s
         self.arena_bounds = arena_bounds
+        self.operation_types = tuple(operation_types)
         if not math.isfinite(self.velocity_scale_m_s) or self.velocity_scale_m_s <= 0:
             raise ValueError("velocity_scale_m_s must be finite and positive")
         if (len(arena_bounds) != 4 or not all(math.isfinite(value) for value in arena_bounds)
@@ -151,15 +158,14 @@ class WorldEncoder(nn.Module):
             _put(row, key, mission.get(key), 90.0 if key == "remaining_s" else 1.0)
         active = _object(world.get("active_operation"))
         last = _object(world.get("last_action_result"))
-        action_types = ("IDLE", "CANCEL", "MOVE", "SUCTION_1_ON", "SUCTION_2_ON", "SUCTION_3_ON",
-                        "SUCTION_1_OFF", "SUCTION_2_OFF", "SUCTION_3_OFF", "TOGGLE_WRIST")
         statuses = ("idle", "issuing", "running", "cancel_requested", "canceling",
                     "succeeded", "failed", "canceled", "rejected")
         active_is_idle = "active_operation" in world and world.get("active_operation") is None
         map_bounds = self._bounds(world)
         for prefix, operation in (("active", active), ("last", last)):
             known_idle = prefix == "active" and active_is_idle
-            _category(row, prefix + "_type", "IDLE" if known_idle else operation.get("type"), action_types)
+            _category(row, prefix + "_type", "IDLE" if known_idle else operation.get("type"),
+                      self.operation_types)
             _category(row, prefix + "_status", "idle" if known_idle else operation.get("status"), statuses)
             _flag(row, prefix + "_failed", False if known_idle else operation.get("failed"))
             _flag(row, prefix + "_cancelable", False if known_idle else operation.get("cancelable"))

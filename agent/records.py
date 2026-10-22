@@ -52,13 +52,6 @@ class EpisodeRecords:
         ready = complete and rewards_complete and winner_targets is not None and bool(transitions) and all(
             isinstance(row.get("reward"), dict) for row in transitions
         )
-        returns = {robot_id: 0.0 for robot_id in self.robot_ids}
-        for row in reversed(transitions):
-            row["return_targets"] = None
-            if ready:
-                returns = {robot_id: float(row["reward"][robot_id]) + self.gamma * returns[robot_id]
-                           for robot_id in self.robot_ids}
-                row["return_targets"] = dict(returns)
         self.add({"kind": "episode_end", "reason": reason})
         for row in self.rows:
             row.update(complete=complete, winner_id=winner_id,

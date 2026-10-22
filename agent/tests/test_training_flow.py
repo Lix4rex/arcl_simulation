@@ -6,6 +6,7 @@ import copy
 import json
 import math
 import sys
+import subprocess
 import tempfile
 import time
 from types import ModuleType, SimpleNamespace
@@ -17,10 +18,21 @@ import torch
 
 from agent.architecture.policy import ACTIONS, AgentPolicy
 from agent.architecture.action_executor import ActionExecutor
-from agent.architecture.world_encoder import WorldEncoder
-from agent.architecture.train_policy import ppo_loss, read_episodes, split_episodes, train
+from agent.architecture.world_encoder import LEGACY_OPERATION_TYPES, WorldEncoder
+from agent.architecture.demonstrations import DemonstrationRecorder
+from agent.architecture.targets import one_hot_action, selfplay_target_distribution
+from agent.architecture.train_targets import (
+    augment_length_symmetry,
+    balance_action_samples,
+    mirror_sample_along_length,
+    read_target_datasets,
+    split_groups,
+    target_loss,
+    train,
+)
 from agent.records import EpisodeRecords
 from agent.rl.environment import TwoRobotArenaEnv
+from agent.rl.prepare_targets import prepare_targets, read_selfplay_episodes
 
 
 class ToyBackend:
@@ -137,6 +149,19 @@ class TrainingFlowTests(unittest.TestCase):
         torch.manual_seed(7)
         self.policy = AgentPolicy()
 
+    def test_selfplay_target_distribution_is_bounded_and_preserves_action_mask(self) -> None:
+        probabilities = [0.2, 0.0, 0.5, 0.3] + [0.0] * (len(ACTIONS) - 4)
+        positive = selfplay_target_distribution(probabilities, "MOVE", 1.0)
+        negative = selfplay_target_distribution(probabilities, "MOVE", -1.0)
+        neutral = selfplay_target_distribution(probabilities, "MOVE", 0.0)
+        self.assertTrue(math.isclose(sum(positive), 1.0))
+        self.assertTrue(math.isclose(sum(negative), 1.0))
+        self.assertEqual(positive[1], 0.0)
+        self.assertEqual(negative[1], 0.0)
+        self.assertGreater(positive[ACTIONS.index("MOVE")], probabilities[ACTIONS.index("MOVE")])
+        self.assertLess(negative[ACTIONS.index("MOVE")], probabilities[ACTIONS.index("MOVE")])
+        self.assertEqual(neutral, probabilities)
+
     def test_policy_masks_cancel_when_idle_and_can_cancel_only_a_move(self) -> None:
         for payload in (None, "empty", "loaded"):
             world = ToyBackend().reset()["observations"]["blue"]
@@ -173,7 +198,7 @@ class TrainingFlowTests(unittest.TestCase):
         output = self.policy.network(world)
         distribution, _ = self.policy._distributions(world, output)
         self.assertEqual(torch.isfinite(distribution.logits).tolist(),
-                         [True, False, False, False, False, False, False, False, False, False])
+                         [True] + [False] * (len(ACTIONS) - 1))
         world["active_operation"] = {"status": "unknown"}
         self.assertEqual(self.policy.decide(world)["action"], "IDLE")
 
@@ -185,7 +210,7 @@ class TrainingFlowTests(unittest.TestCase):
         output = self.policy.network(world)
         distribution, _ = self.policy._distributions(world, output)
         self.assertEqual(torch.isfinite(distribution.logits).tolist(),
-                         [True, False, True, True, True, True, True, True, True, True])
+                         [True, False] + [True] * (len(ACTIONS) - 2))
         world["active_operation"] = {"type": "SUCTION_1_ON", "status": "running", "cancelable": False}
         self.assertEqual(self.policy.decide(world)["action"], "IDLE")
 
@@ -218,6 +243,60 @@ class TrainingFlowTests(unittest.TestCase):
             distribution, _ = self.policy._distributions(unknown_pose, output)
             self.assertFalse(torch.isfinite(distribution.logits[ACTIONS.index("MOVE")]))
 
+    def test_training_samples_are_balanced_and_length_mirrored_with_angles(self) -> None:
+        observation = ToyBackend().reset()["observations"]["blue"]
+        observation["robot"]["pose"] = {"x": 0.25, "y": 0.5, "yaw": 0.4}
+        observation["robot"]["velocity"] = {"x": 0.3, "y": -0.2, "yaw": 0.5}
+        observation["cartons"][0]["pose"] = {"x": 1.0, "y": 0.5, "yaw": 0.25}
+        observation["obstacles"] = [
+            {"pose": {"x": 2.0, "y": 1.0, "yaw": -0.2}, "radius": 0.2}
+        ]
+        observation["active_operation"] = {
+            "target_pose": {"x": 2.5, "y": 1.0, "sin": math.sin(0.6), "cos": math.cos(0.6)}
+        }
+        move_sample = {
+            "chosen_action": "MOVE",
+            "target_action_probs": one_hot_action("MOVE"),
+            "target_move_pose": {
+                "x": 2.25, "y": 0.75, "sin": math.sin(0.7), "cos": math.cos(0.7),
+            },
+            "move_target_valid": True,
+            "observation": observation,
+        }
+        samples = [
+            {**copy.deepcopy(move_sample), "chosen_action": "IDLE",
+             "target_action_probs": one_hot_action("IDLE"), "move_target_valid": False,
+             "target_move_pose": None}
+            for _ in range(3)
+        ] + [move_sample]
+
+        balanced = balance_action_samples(samples, seed=7)
+        self.assertEqual(len(balanced), 6)
+        self.assertEqual([sum(sample["chosen_action"] == action for sample in balanced)
+                          for action in ("IDLE", "MOVE")], [3, 3])
+        augmented = augment_length_symmetry(balanced)
+        self.assertEqual(len(augmented), 2 * len(balanced))
+
+        original = copy.deepcopy(move_sample)
+        mirrored = mirror_sample_along_length(move_sample)
+        mirror_world = mirrored["observation"]
+        self.assertAlmostEqual(mirror_world["robot"]["pose"]["x"], 2.75)
+        self.assertAlmostEqual(mirror_world["robot"]["pose"]["yaw"], math.pi - 0.4)
+        self.assertAlmostEqual(mirror_world["robot"]["velocity"]["x"], -0.3)
+        self.assertAlmostEqual(mirror_world["robot"]["velocity"]["yaw"], -0.5)
+        self.assertAlmostEqual(mirror_world["cartons"][0]["pose"]["x"], 2.0)
+        self.assertAlmostEqual(mirror_world["cartons"][0]["pose"]["yaw"], math.pi - 0.25)
+        self.assertAlmostEqual(mirror_world["obstacles"][0]["pose"]["yaw"], math.pi + 0.2)
+        active_target = mirror_world["active_operation"]["target_pose"]
+        self.assertAlmostEqual(active_target["x"], 0.5)
+        self.assertAlmostEqual(active_target["sin"], math.sin(0.6))
+        self.assertAlmostEqual(active_target["cos"], -math.cos(0.6))
+        self.assertAlmostEqual(mirrored["target_move_pose"]["x"], 0.75)
+        self.assertAlmostEqual(mirrored["target_move_pose"]["sin"], math.sin(0.7))
+        self.assertAlmostEqual(mirrored["target_move_pose"]["cos"], -math.cos(0.7))
+        self.assertEqual(mirrored["chosen_action"], "MOVE")
+        self.assertEqual(move_sample, original)
+
     def test_executor_validates_fresh_pose_and_wrist_without_starting_ros(self) -> None:
         executor = ActionExecutor()
         world = ToyBackend().reset()["observations"]["blue"]
@@ -236,30 +315,6 @@ class TrainingFlowTests(unittest.TestCase):
                           "y": world["robot"]["pose"]["y"], "sin": 0.0, "cos": 1.0}
         with self.assertRaisesRegex(ValueError, "too close to the current position"):
             executor._validate_action("MOVE", {"target_pose": stationary_move}, world)
-
-    def test_move_finishes_only_after_fresh_pose_and_stopped_velocity(self) -> None:
-        executor = ActionExecutor()
-        executor.active = {
-            "id": "move-1", "type": "MOVE", "status": "running", "cancelable": True,
-            "failed": False, "started_at": time.monotonic(), "started_sequence": 1,
-            "target_pose": {"x": 1.0, "y": 1.0, "sin": 0.0, "cos": 1.0},
-        }
-        world = {
-            "sequence": 2,
-            "robot": {"pose": {"x": 1.0, "y": 1.0, "yaw": 0.0}, "pose_age_s": 0.0,
-                      "velocity": {"x": 0.0, "y": 0.0, "yaw": 0.0}},
-            "sources": {"robot_pose": {"fresh": True},
-                        "velocity": {"fresh": True, "age_s": 0.0}},
-        }
-        async def observe_until_stopped():
-            for sequence in range(2, 7):
-                world["sequence"] = sequence
-                await executor.update(world)
-                await asyncio.sleep(0.1)
-
-        asyncio.run(observe_until_stopped())
-        self.assertIsNone(executor.active)
-        self.assertEqual(executor.last_result["status"], "succeeded")
 
     def test_late_remote_result_resolves_unknown_lock(self) -> None:
         class Future:
@@ -331,6 +386,47 @@ class TrainingFlowTests(unittest.TestCase):
         self.assertIs(operation["terminal_future"], client.future)
         self.assertEqual(result["status"], "succeeded")
 
+    def test_group_suction_calls_the_aggregate_service(self) -> None:
+        class FakeSetBool:
+            class Request:
+                def __init__(self) -> None:
+                    self.data = False
+
+        class FakeClient:
+            request = None
+            future = object()
+
+            @staticmethod
+            def service_is_ready() -> bool:
+                return True
+
+            def call_async(self, request):
+                self.request = request
+                return self.future
+
+        std_srvs = ModuleType("std_srvs")
+        srv = ModuleType("std_srvs.srv")
+        srv.SetBool = FakeSetBool
+        std_srvs.srv = srv
+        client = FakeClient()
+        executor = ActionExecutor()
+        executor._suction_all_client = client
+
+        async def wait_for_response(future, timeout_s):
+            self.assertIs(future, client.future)
+            self.assertGreater(timeout_s, 0.0)
+            return SimpleNamespace(success=True, message="group suction accepted")
+
+        with patch.dict(sys.modules, {"std_srvs": std_srvs, "std_srvs.srv": srv}), patch(
+            "agent.architecture.action_executor._wait_ros_future", new=wait_for_response
+        ):
+            result = asyncio.run(executor._run_operation(
+                {"type": "SUCTION_ALL_ON"}, {"action": "SUCTION_ALL_ON"}, {}
+            ))
+
+        self.assertTrue(client.request.data)
+        self.assertEqual(result["status"], "succeeded")
+
     def test_positive_move_log_density_and_permissive_v1_checkpoint_load(self) -> None:
         world = ToyBackend().reset()["observations"]["blue"]
         with torch.no_grad():
@@ -342,12 +438,46 @@ class TrainingFlowTests(unittest.TestCase):
         self.assertGreater(float(log_prob), 0.0)
         with tempfile.TemporaryDirectory() as directory:
             legacy = Path(directory) / "legacy.pt"
+            old_state = {
+                name: value.detach().clone()
+                for name, value in self.policy.network.state_dict().items()
+            }
+            old_state["action_head.2.weight"] = old_state["action_head.2.weight"][:10].clone()
+            old_state["action_head.2.bias"] = old_state["action_head.2.bias"][:10].clone()
+            old_encoder = WorldEncoder(operation_types=LEGACY_OPERATION_TYPES)
+            old_names = old_encoder.feature_names["context"]
+            new_names = self.policy.network.encoder.feature_names["context"]
+            old_context_weights = {}
+            for key, prefix_size in (
+                ("encoder.attention_query.0.weight", 32),
+                ("encoder.context_mlp.0.weight", 96),
+            ):
+                current = old_state[key]
+                old_context_weights[key] = torch.cat((
+                    current[:, :prefix_size],
+                    current[:, [prefix_size + new_names.index(name) for name in old_names]],
+                ), dim=1)
+                old_state[key] = old_context_weights[key].clone()
             torch.save({"format": "arcl-agent-policy-v1",
-                        "state_dict": self.policy.network.state_dict()}, legacy)
+                        "state_dict": old_state}, legacy)
             loaded = AgentPolicy()
             loaded.load_checkpoint(legacy)
-            for name, parameter in self.policy.network.state_dict().items():
-                self.assertTrue(torch.equal(parameter, loaded.network.state_dict()[name]))
+            loaded_state = loaded.network.state_dict()
+            self.assertTrue(torch.equal(
+                old_state["action_head.2.weight"], loaded_state["action_head.2.weight"][:10]
+            ))
+            self.assertTrue(torch.equal(
+                old_state["action_head.2.bias"], loaded_state["action_head.2.bias"][:10]
+            ))
+            for key, prefix_size in (
+                ("encoder.attention_query.0.weight", 32),
+                ("encoder.context_mlp.0.weight", 96),
+            ):
+                for old_index, name in enumerate(old_names):
+                    self.assertTrue(torch.equal(
+                        old_context_weights[key][:, prefix_size + old_index],
+                        loaded_state[key][:, prefix_size + new_names.index(name)],
+                    ))
 
     def test_six_step_flow_relabels_all_records_before_publishing(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -362,7 +492,6 @@ class TrainingFlowTests(unittest.TestCase):
             transitions = [row for row in rows if row["kind"] == "transition"]
             self.assertEqual(len(transitions), 6)
             expected = sum(0.1 * 0.9 ** step for step in range(6)) + 0.9 ** 5
-            self.assertAlmostEqual(transitions[0]["return_targets"]["blue"], expected)
             self.assertAlmostEqual(transitions[-1]["reward"]["blue"], 1.1)
             for row in transitions:
                 self.assertNotIn("secret_truth", row["agent_observations"]["blue"])
@@ -370,8 +499,21 @@ class TrainingFlowTests(unittest.TestCase):
             self.assertEqual(transitions[0]["actions"]["blue"]["target_pose"]["x"],
                              transitions[0]["backend_actions"]["blue"]["target_pose"]["x"])
             self.assertFalse(info["rewards_pending"])
-            episodes, _ = read_episodes([path])
-            self.assertEqual(len(next(iter(episodes.values()))), 12)
+            self.assertEqual(len(transitions[0]["actions"]["blue"]["behavior"]["action_probs"]),
+                             len(ACTIONS))
+            prepared = Path(directory) / "targets.jsonl"
+            self.assertEqual(prepare_targets([path], prepared), 12)
+            self.assertEqual(prepare_targets([path], prepared), 0)
+            samples = [json.loads(line) for line in prepared.read_text().splitlines()]
+            self.assertEqual(len(samples), 12)
+            self.assertTrue(all(sample["format"] == "arcl-agent-targets-v1" for sample in samples))
+            self.assertTrue(all(not sample["move_target_valid"] for sample in samples))
+            self.assertTrue(all(math.isclose(sum(sample["target_action_probs"]), 1.0)
+                                for sample in samples))
+            first_blue = next(sample for sample in samples
+                              if sample["metadata"]["robot_id"] == "blue"
+                              and sample["metadata"]["step"] == 1)
+            self.assertAlmostEqual(first_blue["metadata"]["discounted_return"], expected)
 
     def test_pending_reward_functions_do_not_create_fake_training_targets(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -380,9 +522,9 @@ class TrainingFlowTests(unittest.TestCase):
             self.assertTrue(info["rewards_pending"])
             rows = [json.loads(line) for line in next(path.glob("*.jsonl")).read_text().splitlines()]
             self.assertTrue(all(row["winner_targets"] is not None for row in rows))
-            self.assertTrue(all(row.get("return_targets") is None for row in rows))
-            with self.assertRaisesRegex(ValueError, "no trainable episodes"):
-                read_episodes([path])
+            self.assertTrue(all("return_targets" not in row for row in rows))
+            with self.assertRaisesRegex(ValueError, "rewards are incomplete"):
+                prepare_targets([path], Path(directory) / "targets.jsonl")
 
     def test_interrupted_episode_is_saved_and_excluded(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -396,8 +538,8 @@ class TrainingFlowTests(unittest.TestCase):
             self.assertTrue(all(not row["complete"] and row["winner_targets"] is None for row in rows))
             env.close()
             self.assertEqual(path.read_text().count('"kind":"episode_end"'), 1)
-            with self.assertRaisesRegex(ValueError, "no trainable episodes"):
-                read_episodes([path])
+            with self.assertRaisesRegex(ValueError, "incomplete"):
+                prepare_targets([path], Path(directory) / "targets.jsonl")
 
     def test_publication_error_never_exposes_a_partial_episode(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -423,70 +565,73 @@ class TrainingFlowTests(unittest.TestCase):
                 self.assertEqual(row["winner_targets"], targets)
                 self.assertEqual(row["winner_known"], targets is not None)
 
-    def test_joint_likelihood_and_actor_gradient(self) -> None:
+    def test_selfplay_soft_target_trains_action_head_without_pose_targets(self) -> None:
         backend = ToyBackend()
         world = backend.reset()["observations"]["blue"]
-        world["cartons"].append({**copy.deepcopy(world["cartons"][0]), "id": "second"})
-        world["cartons"][1]["pose"]["x"] = 1.5
-        world["cartons"][1]["approach_pose"]["x"] = 1.1
-        with torch.no_grad():
-            self.policy.network.action_head[-1].bias.fill_(-10)
-            self.policy.network.action_head[-1].bias[ACTIONS.index("MOVE")] = 5
-        decision = None
-        for _ in range(100):
-            candidate = self.policy.decide(world, deterministic=False)
-            if candidate["action"] == "MOVE":
-                decision = candidate
-                break
-        self.assertIsNotNone(decision)
-        log_prob, _, value = self.policy.evaluate_action(world, decision)
-        self.assertAlmostEqual(float(log_prob.detach()), decision["behavior"]["log_prob"], places=5)
-        sample = {"observation": world, "decision": decision, "old_log_prob": float(log_prob.detach()),
-                  "old_value": float(value.detach()), "return_target": float(value.detach()) + 1}
-        loss, _ = ppo_loss(self.policy, sample)
+        decision = self.policy.decide(world, deterministic=False)
+        probabilities = decision["behavior"]["action_probs"]
+        target = selfplay_target_distribution(probabilities, decision["action"], 1.0)
+        sample = {"observation": world, "target_action_probs": target,
+                  "target_move_pose": None, "move_target_valid": False}
+        loss, _ = target_loss(self.policy, sample, torch.ones(len(ACTIONS)))
         loss.backward()
         self.assertGreater(float(self.policy.network.action_head[-1].weight.grad.abs().sum()), 0)
-        self.assertGreater(float(self.policy.network.move_mean_head[-1].bias.grad.abs().sum()) +
-                           float(self.policy.network.move_mean_head[-1].weight.grad.abs().sum()), 0)
+        self.assertIsNone(self.policy.network.move_mean_head[-1].weight.grad)
 
-    def test_episode_split_is_reproducible_and_keeps_both_robots_together(self) -> None:
+    def test_target_group_split_is_reproducible_and_keeps_episode_robots_together(self) -> None:
         episodes = {str(index): [{"robot": "blue"}, {"robot": "red"}] for index in range(10)}
-        train_set, val_set = split_episodes(episodes, 0.2, 7)
+        train_set, val_set = split_groups(episodes, 0.2, 7)
         self.assertFalse(set(train_set) & set(val_set))
         self.assertEqual(len(val_set), 2)
-        self.assertEqual((train_set, val_set), split_episodes(episodes, 0.2, 7))
+        self.assertEqual((train_set, val_set), split_groups(episodes, 0.2, 7))
         self.assertTrue(all(len(samples) == 2 for samples in (*train_set.values(), *val_set.values())))
 
-    def test_recorded_episodes_train_and_reload_with_held_out_validation(self) -> None:
+    def test_mixed_sources_train_and_reload_with_held_out_validation(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             model, output = root / "collection.pt", root / "trained.pt"
             self.policy.save_checkpoint(model)
             for index in range(3):
-                _collect(self.policy, root / "data" / str(index))
-            _collect(self.policy, root / "held-out-test")
-            args = argparse.Namespace(datasets=[root / "data"], model=model, output=output,
-                                      validation_data=None, test_data=[root / "held-out-test"], validation_fraction=0.34,
-                                      robot_id=None, seed=7, device="cpu", clip=0.2,
-                                      value_weight=0.5, entropy_weight=0.01,
-                                      learning_rate=0.001, epochs=2, batch_size=8)
+                _collect(self.policy, root / "raw" / str(index))
+            _collect(self.policy, root / "held-out-raw")
+            combined_targets = root / "targets.jsonl"
+            heldout_targets = root / "heldout.jsonl"
+            prepare_targets([root / "raw"], combined_targets)
+            prepare_targets([root / "held-out-raw"], heldout_targets)
+            operator = DemonstrationRecorder(
+                combined_targets, session_id="operator-session"
+            )
+            operator.record_decision(
+                ToyBackend().reset()["observations"]["blue"], {"action": "IDLE"},
+                command="idle", requires_result=False,
+            )
+            operator.stop()
+            with self.assertRaisesRegex(ValueError, "canonical"):
+                read_target_datasets([root / "raw"])
+            args = argparse.Namespace(datasets=[combined_targets], model=model,
+                                      output=output, validation_data=None,
+                                      test_data=[heldout_targets], validation_fraction=0.25,
+                                      seed=7, device="cpu", position_weight=1.0,
+                                      orientation_weight=1.0, learning_rate=0.001,
+                                      epochs=2, batch_size=8)
             report = train(args)
-            self.assertEqual(len(report["train_episode_ids"]), 2)
-            self.assertEqual(len(report["validation_episode_ids"]), 1)
-            self.assertFalse(set(report["train_episode_ids"]) & set(report["validation_episode_ids"]))
+            self.assertEqual(len(report["train_group_ids"]), 3)
+            self.assertEqual(len(report["validation_group_ids"]), 1)
+            self.assertFalse(set(report["train_group_ids"]) & set(report["validation_group_ids"]))
+            self.assertEqual(set(report["source_counts"]), {"operator", "selfplay"})
             self.assertTrue(output.with_suffix(".metrics.json").exists())
-            self.assertIn("value_mse", report["test"])
-            self.assertFalse(set(report["test_episode_ids"]) &
-                             (set(report["train_episode_ids"]) | set(report["validation_episode_ids"])))
+            self.assertIn("expected_action_accuracy", report["test"])
+            self.assertFalse(set(report["test_group_ids"]) &
+                             (set(report["train_group_ids"]) | set(report["validation_group_ids"])))
             loaded = AgentPolicy()
             loaded.load_checkpoint(output)
             decision = loaded.decide(ToyBackend().reset()["observations"]["blue"])
             self.assertIn(decision["action"], ACTIONS)
-            args.validation_data = [root / "data"]
+            args.validation_data = [combined_targets]
             with self.assertRaisesRegex(ValueError, "disjoint"):
                 train(args)
 
-    def test_deterministic_decisions_and_duplicate_episodes_are_not_training_data(self) -> None:
+    def test_selfplay_preparer_accepts_saved_distributions_and_rejects_duplicate_episodes(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             _collect(self.policy, root / "data")
@@ -498,12 +643,12 @@ class TrainingFlowTests(unittest.TestCase):
                         decision["behavior"]["sampled"] = False
             deterministic = root / "deterministic.jsonl"
             deterministic.write_text("".join(json.dumps(row) + "\n" for row in rows))
-            with self.assertRaisesRegex(ValueError, "no trainable episodes"):
-                read_episodes([deterministic])
+            targets = root / "targets.jsonl"
+            self.assertEqual(prepare_targets([deterministic], targets), 12)
             duplicate = root / "duplicate.jsonl"
             duplicate.write_text(original.read_text())
             with self.assertRaisesRegex(ValueError, "duplicate episode"):
-                read_episodes([original, duplicate])
+                read_selfplay_episodes([original, duplicate])
 
     def test_time_limit_finishes_and_unknown_results_do_not_become_draws(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -525,7 +670,7 @@ class TrainingFlowTests(unittest.TestCase):
             self.assertTrue(info["rewards_pending"])
             rows = [json.loads(line) for line in next(Path(directory).glob("*.jsonl")).read_text().splitlines()]
             self.assertTrue(all(row["winner_targets"] is None for row in rows))
-            self.assertTrue(all(row.get("return_targets") is None for row in rows))
+            self.assertTrue(all("return_targets" not in row for row in rows))
 
     def test_backend_failure_closes_episode_and_blocks_retry_on_stale_state(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
