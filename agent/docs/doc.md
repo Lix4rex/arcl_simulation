@@ -7,10 +7,11 @@
 | `world_observer.py` | Assemble les observations ROS en snapshots NDJSON. |
 | `gazebo_pose_source.py` | Fournit uniquement les poses des cartons du simulateur, comme substitut explicite de la caméra externe. |
 | `world_encoder.py` | Encode les caractéristiques v2 en ensembles de cartons et obstacles, puis applique une attention conditionnée par le robot. |
-| `policy.py` | Politique hybride masquée : type d’ordre, cible continue de déplacement et estimation de valeur. |
+| `policy.py` | Politique hybride masquée : logits d’action et paramètres continus de déplacement. |
 | `action_executor.py` / `run_agent.py` | Exécution ROS asynchrone et journalisation de l’utilisation live. |
+| `demonstrations.py` / `train_targets.py` | Cibles du pupitre et entraînement supervisé commun. |
 | `rl/environment.py` / `rl/collect.py` | Match à deux robots, collecte stochastique, résultats et récompenses. |
-| `records.py` / `train_policy.py` | Finalisation des fichiers puis mises à jour PPO et validation. |
+| `records.py` / `rl/prepare_targets.py` | Journaux d’épisodes bruts puis distributions cibles self-play. |
 
 Les cartons viennent de la caméra externe, ici remplacée explicitement par les
 poses des seuls modèles Gazebo `pierre_*`. La pose de notre robot vient de
@@ -93,29 +94,30 @@ autres décisions.
 ## Politique et exécution
 
 La politique possède une tête catégorielle, une tête gaussienne à quatre
-variables latentes pour le déplacement et une tête de valeur. Les variables
+variables latentes pour le déplacement et une tête de valeur conservée pour
+compatibilité de checkpoint mais non utilisée par l’entraînement commun. Les variables
 `x,y` sont sigmoïdées dans les limites de la carte réduites par la marge robot
 (défaut 20 cm, configurable par `--robot-margin`) ; la sortie contient le couple
-`sin θ, cos θ`, normalisé puis décodé avec `atan2`. En collecte, les variables
-gaussiennes avant transformation sont journalisées pour PPO. Les checkpoints
+`sin θ, cos θ`, normalisé puis décodé avec `atan2`. En collecte, la distribution
+d’action masquée utilisée au choix est journalisée pour préparer le self-play. Les checkpoints
 gardent l’étiquette v1 et sont chargés sans garde de version ; snapshots et
 épisodes sont versionnés séparément.
 
 | Action | Commande et conditions |
 |---|---|
 | `IDLE` | N’émet aucun ordre ; l’opération active continue. |
-| `CANCEL` | Remplace le but du déplacement par un court but d’arrêt ; seule une pose confirmée peut clore l’opération. |
-| `MOVE` | Publie une pose absolue `map` sur `/goal_pose`. Les cibles sans déplacement sont refusées car le contrôleur actuel divise par la longueur du trajet. |
+| `CANCEL` | Demande l’annulation du déplacement via `/go_to_pose` et attend son résultat terminal. |
+| `MOVE` | Envoie une cible absolue `x, y, theta` à l’action ROS `/go_to_pose`. Les cibles sans déplacement sont refusées car le contrôleur actuel divise par la longueur du trajet. |
 | `SUCTION_<n>_ON/OFF` | Active ou désactive une ventouse précise via son service `SetBool`. |
+| `SUCTION_ALL_ON/OFF` | Commande les trois ventouses via `/robot_omni/ventouse/set`. |
 | `TOGGLE_WRIST` | Bascule le poignet entre 0° et 90° selon l’angle mesuré. |
 
-L’exécuteur utilise un publisher ROS `PoseStamped` et des clients `SetBool`
-sérialisés. Le topic `/goal_pose` ne fournit pas de résultat terminal : le
-déplacement n’est confirmé qu’après une pose fraîche à moins de 4 cm et 0,10 rad
-de la cible, et une vitesse mesurée nulle. Sinon le verrou reste `unknown`.
-`CANCEL` remplace le but par une cible à 2 cm, puis attend la même confirmation ;
-ce n’est pas une annulation ROS atomique. Les services ventouse et poignet ne
-sont pas annulables. Aucun nouvel ordre n’est envoyé avant une fin confirmée.
+L’exécuteur utilise un client d’action ROS `GoToPose` et des clients `SetBool`
+sérialisés. L’acceptation, le refus et le résultat terminal du déplacement viennent
+du serveur `/go_to_pose`. Un timeout demande l’annulation et conserve le verrou
+`unknown` jusqu’au résultat terminal. `CANCEL` arrête les roues côté contrôleur,
+puis le serveur confirme l’annulation. Les services ventouse et poignet ne sont
+pas annulables. Aucun nouvel ordre n’est envoyé avant une fin confirmée.
 Le pas d’observation/décision live par défaut est 10 Hz. Garder la même marge
 dans le runner et l’environnement afin que le préfiltrage des cibles soit cohérent.
 
@@ -129,8 +131,8 @@ dans le runner et l’environnement afin que le préfiltrage des cibles soit coh
 | 4. Exécution | La cible absolue `MOVE` est validée dans les bornes de déplacement, puis envoyée au backend. |
 | 5. Retour | `advance` fournit nouvelle vérité, nouvelles observations et réponses d’exécution. Les points d’action sont calculés depuis ces résultats. |
 | 6. Fin | Signal explicite de fin ou limite de 90 secondes par défaut ; le gagnant est déterminé depuis les scores vrais ou un `winner_id` explicite. |
-| 7. Cibles | Les points terminaux sont ajoutés à la dernière transition. Les retours sont propagés en arrière et les cibles de victoire renseignées sur toutes les lignes. |
-| 8. Sauvegarde | Le fichier externe est écrit seulement après cette mise à jour complète. L’entraîneur le relit sans avoir à corriger les premières lignes. |
+| 7. Récompenses | Les points terminaux sont ajoutés à la dernière transition et les récompenses disponibles sont conservées dans le journal brut. |
+| 8. Sauvegarde | Le journal d’épisode est écrit après finalisation ; `rl/prepare_targets.py` calcule ensuite les retours et distribue les cibles canoniques. |
 
 Le backend reçoit `max_game_seconds`, le budget restant. Dépasser cette durée,
 reculer dans le temps ou ne faire avancer ni l’horloge ni la fin du match est une
@@ -170,7 +172,7 @@ fonction de points sont celles transmises au backend, avec leurs poses `map`.
 La récompense terminale s’ajoute aux points de la dernière action. Pour un usage
 Python, les fonctions peuvent aussi être injectées au constructeur de
 `TwoRobotArenaEnv`. Sans elles, `rewards_pending` reste explicite et les fichiers
-ne deviennent pas des exemples PPO. Le mode `collect --record-only` est prévu
+ne deviennent pas des cibles self-play. Le mode `collect --record-only` est prévu
 pour cette situation ; aucun barème de production n’est inventé.
 
 ## Fichiers externes et finalisation des cibles
@@ -186,19 +188,17 @@ Les lignes RL ont les types `reset`, `decision`, `transition`, `episode_end`.
 Une transition conserve notamment :
 
 - `agent_observations` : vues exactes des deux politiques avant la décision ;
-- `actions` : décisions et probabilités de collecte ; `backend_actions` : poses converties pour le simulateur ;
+- `actions` : décisions et distributions masquées de collecte ; `backend_actions` : poses converties pour le simulateur ;
 - `world`, `next_world`, observations brutes et réponses : diagnostic séparé ;
 - `reward` : points immédiats, auxquels s’ajoutent les points terminaux sur la dernière transition ;
-- `return_targets` : retours actualisés par robot, calculés à la fin ;
 - `winner_targets` : 1 pour le gagnant, 0 pour le perdant, 0.5 chacun pour une égalité ;
 - `complete`, `winner_known`, `rewards_complete`, `episode_id`, `gamma`.
 
 Les cibles de victoire sont propagées sur toutes les lignes, y compris le reset
-et les premières décisions, avant toute écriture. Les retours sont définis par
-`G[t] = reward[t] + gamma * G[t+1]`, avec zéro au-delà de la fin du match.
-Le défaut est `gamma = 0.99` par décision, configurable à la collecte.
-Le `winner_target` est un résultat descriptif ; il n’est pas automatiquement
-utilisé comme récompense à la place des fonctions de points.
+et les premières décisions, avant toute écriture. Le préparateur calcule les
+retours `G[t] = reward[t] + gamma * G[t+1]` à partir des récompenses brutes ; le
+défaut de `gamma` est 0.99 par décision. Le `winner_target` est descriptif ; il
+ne remplace pas automatiquement les fonctions de points.
 
 Une fermeture ou un reset prématuré finalise un journal `complete: false`, sans
 cibles inventées. Une fin sans résultat connu conserve `winner_targets: null`.
@@ -208,37 +208,51 @@ les épisodes interrompus ; le collecteur CLI le fait automatiquement.
 Le runner live enregistre les observations, décisions et résultats disponibles.
 Il reconnaît `match.finished`, `match_finished` ou `mission.remaining_s <= 0`.
 Une simple fin de fichier ne prouve pas la fin de partie. Ces journaux n’ont pas
-de récompenses calculées par le backend et restent diagnostiques pour PPO.
+de récompenses calculées par le backend et restent des données brutes.
 
-## Entraînement par renforcement et partitions
+## Cibles et entraînement commun
 
-`train_policy` relit les épisodes complets et récompensés. Il ne forme ses
-entrées qu’à partir de `agent_observations`, jamais depuis `world` ni les
-observations suivantes. Les transitions doivent avoir des retours finaux et
-des décisions échantillonnées avec log-probabilité et valeur de collecte.
-Les attentes imposées par une pose inutilisable, dépourvues de ces données,
-sont conservées dans le journal mais ne constituent pas des entrées apprenables.
+Le pupitre enregistre le choix au point où son interface appelle le service ou
+l’action ROS. Un processus externe ne peut pas observer fiablement les requêtes
+de services ni les paramètres des buts d’action sans relais ou introspection
+supplémentaire. Chaque choix supporté devient une distribution one-hot sur les
+12 actions ; les paramètres `MOVE` sont ceux saisis par l’utilisateur. Le
+résultat final reste une métadonnée et ne change jamais l’étiquette. Les `IDLE`
+implicites ne sont enregistrés que pendant une opération active.
+Une commande de poignet n’est pas convertie en cible si son angle mesuré est
+inconnu, car la politique ne peut alors pas déterminer si elle doit basculer.
 
-L’avantage est `G[t] - V_collecte[t]`. Les mises à jour PPO utilisent le rapport
-entre probabilités actuelle et de collecte, avec clipping à 0.2 par défaut,
-une perte de valeur et un bonus d’entropie. Les gradients sont bornés à 0.5.
-Il s’agit de mises à jour sur des épisodes enregistrés, avec un petit nombre de
-passes (4 par défaut). Recollecter régulièrement avec le modèle mis à jour ;
-la réutilisation illimitée d’anciens lots n’est pas une boucle PPO en ligne.
+Les producteurs écrivent le format JSONL commun `arcl-agent-targets-v1`. L’ordre
+stable des 12 actions est `IDLE`, `CANCEL`, `MOVE`, `SUCTION_1_ON`,
+`SUCTION_2_ON`, `SUCTION_3_ON`, `SUCTION_1_OFF`, `SUCTION_2_OFF`,
+`SUCTION_3_OFF`, `TOGGLE_WRIST`, `SUCTION_ALL_ON`, `SUCTION_ALL_OFF` :
 
-La séparation train/validation porte sur les IDs de parties entières : les deux
-robots et tous les instants d’une même partie restent dans la même partition.
-Elle est reproductible avec une graine fixe. Au moins deux épisodes prêts sont
-nécessaires pour la séparation automatique. Des jeux explicites de validation
-et de test peuvent être fournis ; tout chevauchement d’IDs est refusé.
-La normalisation des avantages est estimée uniquement sur le train.
+- `observation` et `target_action_probs` (12 probabilités dans l’ordre `ACTIONS`) ;
+- `target_move_pose` et `move_target_valid` ;
+- `group_id`, `sample_id`, `source` et métadonnées de provenance/résultat.
 
-La validation ne prend aucun gradient et sert à sélectionner le meilleur
-checkpoint, éventuellement celui de départ si aucune époque ne l’améliore.
-Le test facultatif n’est évalué qu’après cette sélection. Le fichier
-`.metrics.json` conserve IDs de partitions, effectifs, épisodes exclus, métriques
-train/validation, meilleure époque et résultat du test éventuel.
-Ces pertes ne remplacent pas une évaluation du taux de victoire en nouveaux matchs.
+Les journaux self-play contiennent les observations, décisions, distributions
+masquées de la politique au moment du choix et récompenses brutes. Le préparateur
+`agent.rl.prepare_targets` exige un épisode complet avec récompenses complètes,
+calcule `G[t] = reward[t] + gamma * G[t+1]`, puis `r = clip(G / max(|G|), -1, 1)`
+par robot et épisode. Il construit la cible
+`q = normalize(max(0, p + α·r·(one_hot(action) − p)))`, avec `α = 0.1` par défaut
+et configurable à la préparation. Les actions masquées gardent une probabilité
+nulle. Les exemples self-play n’entraînent pas les paramètres continus de `MOVE`.
+
+`agent.architecture.train_targets` est l’unique implémentation d’entraînement.
+Elle consomme uniquement les cibles canoniques, applique l’entropie croisée à
+cibles souples aux logits et les pertes existantes de position/orientation
+quand `move_target_valid` est vrai. Le trainer ne lit ni retours, log-probabilités,
+avantages ni cibles de valeur. `train_policy` et `train_imitation` sont des alias
+vers cette même implémentation.
+
+La séparation train/validation/test se fait par session ou épisode afin de ne
+pas répartir un même groupe entre partitions. Au moins deux groupes sont requis
+pour une séparation automatique ; les partitions explicites doivent être
+disjointes. Le fichier `.metrics.json` conserve les effectifs, sources,
+métriques d’action et erreurs de pose. Le checkpoint garde le format v1 et
+reste chargeable par `run_agent --model`.
 
 ## Limites volontairement conservées
 
