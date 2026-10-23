@@ -27,5 +27,5 @@ def generate_launch_description():
 
     return LaunchDescription([
         cam_tracking,
-        aruco_node
+        aruco_node, 
     ])

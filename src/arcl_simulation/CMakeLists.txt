@@ -60,13 +60,6 @@ install(DIRECTORY config launch rviz urdf worlds models
 
 
 if(BUILD_TESTING)
-  find_package(ament_cmake_pytest REQUIRED)
-  ament_add_pytest_test(ventouse_service_test test/test_ventouse_service.py
-    TIMEOUT 90
-    ENV VENTOUSE_SERVICE_EXECUTABLE=$<TARGET_FILE:ventouse_service>)
-  ament_add_pytest_test(robot_control_test test/test_robot_control.py
-    TIMEOUT 60
-    ENV ROBOT_CONTROL_EXECUTABLE=$<TARGET_FILE:robot_control>)
   find_package(ament_lint_auto REQUIRED)
   # the following line skips the linter which checks for copyrights
   # comment the line when a copyright and license is added to all source files

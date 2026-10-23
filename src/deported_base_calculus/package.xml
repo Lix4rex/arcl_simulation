@@ -13,6 +13,9 @@
   <test_depend>ament_lint_common</test_depend>
 
   <depend>rclcpp</depend>
+  <depend>geometry_msgs</depend>
+  <depend>tf2</depend>
+  <depend>visualization_msgs</depend>
   <depend>ros2_aruco_interfaces</depend>
 
   <export>
